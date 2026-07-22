@@ -91,6 +91,12 @@ interface JsExtensions : JsEncodeUtils {
     fun getSource(): BaseSource?
     fun getTag(): String?
 
+    /** Return whether this reader implements a versioned, source-neutral capability. */
+    @JavascriptInterface
+    fun hasReaderCapability(name: String, minVersion: Int): Boolean {
+        return name == "chapter-comments" && minVersion == 1
+    }
+
     private val context: CoroutineContext
         get() = rhinoContextOrNull?.coroutineContext ?: EmptyCoroutineContext
 

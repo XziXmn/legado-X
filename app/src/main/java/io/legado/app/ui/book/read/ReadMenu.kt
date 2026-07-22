@@ -115,6 +115,7 @@ class ReadMenu @JvmOverloads constructor(
                 when (it.itemId) {
                     R.id.menu_login -> callBack.showLogin()
                     R.id.menu_chapter_pay -> callBack.payAction()
+                    R.id.menu_page_comment -> callBack.openCurrentPageComment()
                     R.id.menu_edit_source -> callBack.openSourceEditActivity()
                     R.id.menu_disable_source -> callBack.disableSource()
                 }
@@ -481,6 +482,8 @@ class ReadMenu @JvmOverloads constructor(
                 !ReadBook.bookSource?.loginUrl.isNullOrEmpty()
                         && ReadBook.curTextChapter?.isVip == true
                         && ReadBook.curTextChapter?.isPay != true
+            sourceMenu.menu.findItem(R.id.menu_page_comment).isVisible =
+                callBack.canOpenCurrentPageComment()
             sourceMenu.show()
         }
         //亮度跟随
@@ -689,6 +692,8 @@ class ReadMenu @JvmOverloads constructor(
         fun showHelp()
         fun showLogin()
         fun payAction()
+        fun canOpenCurrentPageComment(): Boolean
+        fun openCurrentPageComment()
         fun disableSource()
         fun skipToChapter(index: Int)
         fun onMenuShow()

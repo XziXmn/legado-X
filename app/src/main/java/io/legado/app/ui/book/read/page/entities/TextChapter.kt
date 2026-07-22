@@ -5,7 +5,15 @@ import androidx.annotation.Keep
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.data.entities.ReplaceRule
+import io.legado.app.data.entities.rule.ChapterCommentRule
 import io.legado.app.help.book.BookContent
+import io.legado.app.model.chapterComment.ChapterCommentState
+import io.legado.app.model.chapterComment.ChapterCommentAnchorResolver
+import io.legado.app.model.chapterComment.ChapterCommentPayload
+import io.legado.app.model.chapterComment.ResolvedChapterCommentSegment
+import io.legado.app.ui.book.read.page.entities.ChapterCommentPageBlock.Companion.END_PADDING
+import io.legado.app.ui.book.read.page.entities.ChapterCommentPageBlock.Companion.TOP_GAP
+import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.ui.book.read.page.provider.LayoutProgressListener
 import io.legado.app.ui.book.read.page.provider.TextChapterLayout
 import io.legado.app.utils.fastBinarySearchBy
@@ -29,6 +37,21 @@ data class TextChapter(
     //起效的替换规则
     val effectiveReplaceRules: List<ReplaceRule>?
 ) : LayoutProgressListener {
+
+    @Volatile
+    var chapterCommentState: ChapterCommentState = ChapterCommentState.Disabled
+
+    @Volatile
+    var chapterCommentRule: ChapterCommentRule? = null
+
+    @Volatile
+    var chapterCommentAnchors: List<ResolvedChapterCommentSegment> = emptyList()
+
+    private val chapterCommentLock = Any()
+    private var pendingChapterCommentPayload: ChapterCommentPayload? = null
+
+    @Volatile
+    var isContentCacheStale: Boolean = false
 
     private val textPages = arrayListOf<TextPage>()
     val pages: List<TextPage> get() = textPages
@@ -294,6 +317,9 @@ data class TextChapter(
 
     override fun onLayoutCompleted() {
         isCompleted = true
+        synchronized(chapterCommentLock) {
+            rebuildChapterCommentProjection()
+        }
         listener?.onLayoutCompleted()
         listener = null
     }
@@ -306,6 +332,75 @@ data class TextChapter(
     fun cancelLayout() {
         layout?.cancel()
         listener = null
+    }
+
+    fun updateChapterCommentPayload(payload: ChapterCommentPayload?) {
+        synchronized(chapterCommentLock) {
+            pendingChapterCommentPayload = payload
+            if (isCompleted) rebuildChapterCommentProjection()
+        }
+    }
+
+    fun pageCommentProjection(page: TextPage, leftPage: Boolean? = null) =
+        io.legado.app.model.chapterComment.ChapterCommentPageProjector.project(
+            page.lines.asSequence()
+                .filter { !page.doublePage || leftPage != null && it.isLeftLine == leftPage }
+                .map { it.paragraphNum }
+                .asIterable(),
+            chapterCommentAnchors,
+        )
+
+    private fun rebuildChapterCommentProjection() {
+        val payload = pendingChapterCommentPayload
+        chapterCommentAnchors = if (payload == null) {
+            emptyList()
+        } else {
+            ChapterCommentAnchorResolver.resolve(payload, paragraphs.map { it.text })
+        }
+        removeChapterCommentBlocks()
+        if (chapterCommentRule?.display?.chapter?.enabled == true) {
+            payload?.chapter?.let(::appendChapterCommentBlock)
+        }
+    }
+
+    private fun removeChapterCommentBlocks() {
+        textPages.forEach(TextPage::clearBlocks)
+        textPages.removeAll { it.lines.isEmpty() && it.text.isEmpty() }
+        textPages.forEachIndexed { index, page -> page.index = index }
+    }
+
+    private fun appendChapterCommentBlock(summary: io.legado.app.model.chapterComment.ChapterCommentSummary) {
+        val lastTextPage = textPages.lastOrNull() ?: return
+        val lastLineBottom = lastTextPage.lines.maxOfOrNull { it.lineBottom }
+            ?: ChapterProvider.paddingTop.toFloat()
+        val top = lastLineBottom + TOP_GAP
+        val blockHeight = ChapterCommentPageBlock.preferredHeight(summary)
+        val block = ChapterCommentPageBlock(summary, top, blockHeight)
+        if (block.bottom + END_PADDING <= ChapterProvider.visibleBottom) {
+            lastTextPage.addBlock(block)
+            return
+        }
+
+        val chapterEndPosition = lastTextPage.lines.lastOrNull()?.let {
+            it.chapterPosition + it.charSize + if (it.isParagraphEnd) 1 else 0
+        } ?: lastTextPage.chapterPosition + lastTextPage.charSize
+        val blockOnlyPage = TextPage(
+            index = textPages.size,
+            text = "",
+            title = title,
+            chapterSize = chaptersSize,
+            chapterIndex = chapter.index,
+            height = ChapterProvider.paddingTop + blockHeight +
+                    TOP_GAP + END_PADDING,
+        ).apply {
+            fallbackChapterPosition = chapterEndPosition
+            textChapter = this@TextChapter
+            doublePage = ChapterProvider.doublePage
+            paddingTop = ChapterProvider.paddingTop
+            isCompleted = true
+            addBlock(ChapterCommentPageBlock(summary, ChapterProvider.paddingTop + TOP_GAP, blockHeight))
+        }
+        textPages.add(blockOnlyPage)
     }
 
     companion object {

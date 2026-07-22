@@ -24,6 +24,10 @@ import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.globalExecutor
 import io.legado.app.model.localBook.TextFile
+import io.legado.app.model.chapterComment.ChapterCommentLoadResult
+import io.legado.app.model.chapterComment.ChapterCommentLoader
+import io.legado.app.model.chapterComment.ChapterCommentPriority
+import io.legado.app.model.chapterComment.ChapterCommentState
 import io.legado.app.model.webBook.WebBook
 import io.legado.app.service.BaseReadAloudService
 import io.legado.app.service.CacheBookService
@@ -31,6 +35,7 @@ import io.legado.app.ui.book.read.page.entities.TextChapter
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.ui.book.read.page.provider.LayoutProgressListener
 import io.legado.app.utils.postEvent
+import io.legado.app.utils.NetworkUtils
 import io.legado.app.utils.stackTraceStr
 import io.legado.app.utils.toastOnUi
 import kotlinx.coroutines.CancellationException
@@ -76,6 +81,8 @@ object ReadBook : CoroutineScope by MainScope() {
     private val loadingChapters = arrayListOf<Int>()
     private val readRecord = ReadRecord()
     private val chapterLoadingJobs = ConcurrentHashMap<Int, Coroutine<*>>()
+    private val chapterCommentJobs = ConcurrentHashMap<Int, Job>()
+    private val chapterCommentLoader by lazy { ChapterCommentLoader() }
     private val prevChapterLoadingLock = Mutex()
     private val curChapterLoadingLock = Mutex()
     private val nextChapterLoadingLock = Mutex()
@@ -223,6 +230,7 @@ object ReadBook : CoroutineScope by MainScope() {
 
     fun clearTextChapter() {
         clearExpiredChapterLoadingJob(true)
+        clearExpiredChapterCommentJobs(true)
         prevTextChapter = null
         curTextChapter = null
         nextTextChapter = null
@@ -339,6 +347,7 @@ object ReadBook : CoroutineScope by MainScope() {
             prevTextChapter = curTextChapter
             curTextChapter = nextTextChapter
             nextTextChapter = null
+            promoteCurrentChapterComment()
             if (curTextChapter == null) {
                 AppLog.putDebug("moveToNextChapter-章节未加载,开始加载")
                 if (upContentInPlace) callBack?.upContent()
@@ -370,6 +379,7 @@ object ReadBook : CoroutineScope by MainScope() {
             prevTextChapter = curTextChapter
             curTextChapter = nextTextChapter
             nextTextChapter = null
+            promoteCurrentChapterComment()
             if (curTextChapter == null) {
                 AppLog.putDebug("moveToNextChapter-章节未加载,开始加载")
                 if (upContentInPlace) callBack?.upContentAwait()
@@ -402,6 +412,7 @@ object ReadBook : CoroutineScope by MainScope() {
             nextTextChapter = curTextChapter
             curTextChapter = prevTextChapter
             prevTextChapter = null
+            promoteCurrentChapterComment()
             if (curTextChapter == null) {
                 if (upContentInPlace) callBack?.upContent()
                 loadContent(durChapterIndex, upContent, resetPageOffset = false)
@@ -543,6 +554,10 @@ object ReadBook : CoroutineScope by MainScope() {
     }
 
     fun loadOrUpContent(success: (() -> Unit)? = null) {
+        if (curTextChapter?.isContentCacheStale == true && NetworkUtils.isAvailable()) {
+            curTextChapter?.cancelLayout()
+            curTextChapter = null
+        }
         if (curTextChapter == null) {
             loadContent(durChapterIndex) {
                 success?.invoke()
@@ -575,7 +590,9 @@ object ReadBook : CoroutineScope by MainScope() {
             val book = book!!
             val chapter = appDb.bookChapterDao.getChapter(book.bookUrl, index) ?: return@async
             if (addLoading(index)) {
-                BookHelp.getContent(book, chapter)?.let {
+                BookHelp.getContent(book, chapter)
+                    ?.takeIf { BookHelp.hasUsableContent(book, chapter, bookSource) }
+                    ?.let {
                     contentLoadFinish(
                         book,
                         chapter,
@@ -605,7 +622,9 @@ object ReadBook : CoroutineScope by MainScope() {
             try {
                 val book = book!!
                 val chapter = appDb.bookChapterDao.getChapter(book.bookUrl, index)!!
-                val content = BookHelp.getContent(book, chapter) ?: downloadAwait(chapter)
+                val content = BookHelp.getContent(book, chapter)
+                    ?.takeIf { BookHelp.hasUsableContent(book, chapter, bookSource) }
+                    ?: downloadAwait(chapter)
                 contentLoadFinishAwait(book, chapter, content, upContent, resetPageOffset)
                 success?.invoke()
             } catch (e: Exception) {
@@ -627,7 +646,7 @@ object ReadBook : CoroutineScope by MainScope() {
         }
         val book = book ?: return
         val chapter = appDb.bookChapterDao.getChapter(book.bookUrl, index) ?: return
-        if (BookHelp.hasContent(book, chapter)) {
+        if (BookHelp.hasUsableContent(book, chapter, bookSource)) {
             downloadedChapters.add(chapter.index)
         } else {
             delay(1000)
@@ -717,12 +736,15 @@ object ReadBook : CoroutineScope by MainScope() {
             val textChapter = ChapterProvider.getTextChapterAsync(
                 this, book, chapter, displayTitle, contents, simulatedChapterSize
             )
+            textChapter.isContentCacheStale =
+                BookHelp.isContentRuleStale(book, chapter, bookSource)
             when (val offset = chapter.index - durChapterIndex) {
                 0 -> curChapterLoadingLock.withLock {
                     withContext(Main) {
                         ensureActive()
                         curTextChapter = textChapter
                     }
+                    loadChapterComment(book, chapter, textChapter)
                     callBack?.upMenuView()
                     var available = false
                     for (page in textChapter.layoutChannel) {
@@ -750,6 +772,7 @@ object ReadBook : CoroutineScope by MainScope() {
                         ensureActive()
                         prevTextChapter = textChapter
                     }
+                    loadChapterComment(book, chapter, textChapter)
                     textChapter.layoutChannel.receiveAsFlow().collect()
                     if (upContent) callBack?.upContent(offset, resetPageOffset)
                 }
@@ -759,6 +782,7 @@ object ReadBook : CoroutineScope by MainScope() {
                         ensureActive()
                         nextTextChapter = textChapter
                     }
+                    loadChapterComment(book, chapter, textChapter)
                     for (page in textChapter.layoutChannel) {
                         if (page.index > 1) {
                             continue
@@ -805,12 +829,15 @@ object ReadBook : CoroutineScope by MainScope() {
             val textChapter = ChapterProvider.getTextChapterAsync(
                 this@ReadBook, book, chapter, displayTitle, contents, simulatedChapterSize
             )
+            textChapter.isContentCacheStale =
+                BookHelp.isContentRuleStale(book, chapter, bookSource)
             when (val offset = chapter.index - durChapterIndex) {
                 0 -> {
                     curTextChapter?.cancelLayout()
                     withContext(Main) {
                         curTextChapter = textChapter
                     }
+                    loadChapterComment(book, chapter, textChapter)
                     callBack?.upMenuView()
                     var available = false
                     for (page in textChapter.layoutChannel) {
@@ -838,6 +865,7 @@ object ReadBook : CoroutineScope by MainScope() {
                     withContext(Main) {
                         prevTextChapter = textChapter
                     }
+                    loadChapterComment(book, chapter, textChapter)
                     textChapter.layoutChannel.receiveAsFlow().collect()
                     if (upContent) callBack?.upContent(offset, resetPageOffset)
                 }
@@ -847,6 +875,7 @@ object ReadBook : CoroutineScope by MainScope() {
                     withContext(Main) {
                         nextTextChapter = textChapter
                     }
+                    loadChapterComment(book, chapter, textChapter)
                     for (page in textChapter.layoutChannel) {
                         if (page.index > 1) {
                             continue
@@ -999,6 +1028,111 @@ object ReadBook : CoroutineScope by MainScope() {
                 iterator.remove()
             }
         }
+        clearExpiredChapterCommentJobs(clearAll)
+    }
+
+    /** Start a source-defined summary request without coupling it to正文 success. */
+    private fun loadChapterComment(
+        book: Book,
+        chapter: BookChapter,
+        textChapter: TextChapter,
+    ) {
+        chapterCommentJobs.remove(chapter.index)?.cancel()
+        val source = bookSource
+        val rule = source?.getContentRule()?.chapterComment
+        val display = rule?.display
+        val hasVisibleEntry = display?.segment?.enabled == true ||
+                display?.page?.enabled == true ||
+                display?.chapter?.enabled == true
+        if (source == null || rule?.url.isNullOrBlank() || !hasVisibleEntry) {
+            textChapter.chapterCommentRule = null
+            textChapter.updateChapterCommentPayload(null)
+            textChapter.chapterCommentState = ChapterCommentState.Disabled
+            return
+        }
+
+        textChapter.chapterCommentRule = rule
+        textChapter.chapterCommentState = ChapterCommentState.Loading
+        val priority = if (chapter.index == durChapterIndex) {
+            ChapterCommentPriority.CURRENT
+        } else {
+            ChapterCommentPriority.PRELOAD
+        }
+        val job = launch(IO) {
+            try {
+                val result = chapterCommentLoader.load(
+                    source = source,
+                    book = book,
+                    chapter = chapter,
+                    rule = rule,
+                    priority = priority,
+                    onStale = { publishChapterComment(textChapter, it) },
+                )
+                if (result == null) {
+                    publishChapterCommentUnavailable(textChapter)
+                } else {
+                    publishChapterComment(textChapter, result)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                publishChapterCommentUnavailable(textChapter)
+            }
+        }
+        chapterCommentJobs[chapter.index] = job
+        job.invokeOnCompletion {
+            chapterCommentJobs.remove(chapter.index, job)
+        }
+    }
+
+    private suspend fun publishChapterComment(
+        textChapter: TextChapter,
+        result: ChapterCommentLoadResult,
+    ) = withContext(Main) {
+        if (!isActiveTextChapter(textChapter)) return@withContext
+        textChapter.chapterCommentState = ChapterCommentState.Ready(
+            payload = result.payload,
+            stale = result.stale,
+        )
+        textChapter.updateChapterCommentPayload(result.payload)
+        if (curTextChapter === textChapter) {
+            callBack?.upContent(resetPageOffset = false)
+            callBack?.upMenuView()
+        }
+    }
+
+    private suspend fun publishChapterCommentUnavailable(
+        textChapter: TextChapter,
+    ) = withContext(Main) {
+        if (!isActiveTextChapter(textChapter)) return@withContext
+        textChapter.chapterCommentState = ChapterCommentState.Unavailable
+        textChapter.updateChapterCommentPayload(null)
+        if (curTextChapter === textChapter) callBack?.upMenuView()
+    }
+
+    private fun isActiveTextChapter(textChapter: TextChapter): Boolean {
+        return prevTextChapter === textChapter ||
+                curTextChapter === textChapter ||
+                nextTextChapter === textChapter
+    }
+
+    /** Re-entering a prefetched chapter promotes an unfinished summary request. */
+    private fun promoteCurrentChapterComment() {
+        val textChapter = curTextChapter ?: return
+        if (textChapter.chapterCommentState !== ChapterCommentState.Loading) return
+        val currentBook = book ?: return
+        loadChapterComment(currentBook, textChapter.chapter, textChapter)
+    }
+
+    private fun clearExpiredChapterCommentJobs(clearAll: Boolean = false) {
+        val iterator = chapterCommentJobs.iterator()
+        while (iterator.hasNext()) {
+            val (index, job) = iterator.next()
+            if (clearAll || index !in durChapterIndex - 1..durChapterIndex + 1) {
+                job.cancel()
+                iterator.remove()
+            }
+        }
     }
 
     /**
@@ -1026,6 +1160,7 @@ object ReadBook : CoroutineScope by MainScope() {
         coroutineContext.cancelChildren()
         ImageProvider.clear()
         clearExpiredChapterLoadingJob(true)
+        clearExpiredChapterCommentJobs(true)
         if (!CacheBookService.isRun) {
             CacheBook.close()
         }

@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.RectF
 import android.os.Build
 import android.util.AttributeSet
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowInsets
@@ -17,6 +18,9 @@ import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
+import io.legado.app.model.chapterComment.ChapterCommentEvent
+import io.legado.app.model.chapterComment.ChapterCommentPageProjector
+import io.legado.app.ui.book.read.comment.PageCommentPullController
 import io.legado.app.service.BaseReadAloudService
 import io.legado.app.ui.book.read.ContentEditDialog
 import io.legado.app.ui.book.read.page.api.DataSource
@@ -37,6 +41,7 @@ import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.ui.book.read.page.provider.LayoutProgressListener
 import io.legado.app.ui.book.read.page.provider.TextPageFactory
 import io.legado.app.utils.activity
+import io.legado.app.utils.dpToPx
 import io.legado.app.utils.invisible
 import io.legado.app.utils.longToastOnUi
 import io.legado.app.utils.showDialogFragment
@@ -68,6 +73,11 @@ class ReadView(context: Context, attrs: AttributeSet) :
     val defaultAnimationSpeed = 300
     private var pressDown = false
     private var isMove = false
+    private var touchOwner = TouchOwner.NONE
+    private val pageCommentPullController by lazy {
+        PageCommentPullController(PAGE_COMMENT_THRESHOLD_DP.dpToPx().toFloat())
+    }
+    private var pendingPageCommentEvent: ChapterCommentEvent? = null
 
     //起始点
     var startX: Float = 0f
@@ -187,12 +197,20 @@ class ReadView(context: Context, attrs: AttributeSet) :
             }
         }
 
-        //在多点触控时，事件不走ACTION_DOWN分支而产生的特殊事件处理
-        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_UP) {
-            pageDelegate?.onTouch(event)
+        // Multi-touch cancels a claimed comment gesture and otherwise retains the old delegate path.
+        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN ||
+            event.actionMasked == MotionEvent.ACTION_POINTER_UP
+        ) {
+            if (touchOwner == TouchOwner.COMMENT) {
+                finishCommentGesture(cancelled = true)
+            } else {
+                pageDelegate?.onTouch(event)
+            }
+            return true
         }
-        when (event.action) {
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                cancelCommentAnimations()
                 callBack.screenOffTimerStart()
                 if (isTextSelected) {
                     curPage.cancelSelect()
@@ -205,13 +223,40 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 postDelayed(longPressRunnable, longPressTimeout)
                 pressDown = true
                 isMove = false
+                touchOwner = TouchOwner.PAGE
                 pageDelegate?.onTouch(event)
                 pageDelegate?.onDown()
                 setStartPoint(event.x, event.y, false)
+                pendingPageCommentEvent = pageCommentEventAt(event.x)
+                pageCommentPullController.start(
+                    event.x,
+                    event.y,
+                    pendingPageCommentEvent != null && canStartPageCommentGesture(),
+                )
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (!pressDown) return true
+                val pullResult = pageCommentPullController.move(
+                    event.x,
+                    event.y,
+                    slopSquare.toFloat(),
+                    height / 4f,
+                )
+                if (pullResult.claimed) {
+                    if (pullResult.claimedNow) {
+                        cancelPageDelegate(event)
+                        touchOwner = TouchOwner.COMMENT
+                        isMove = true
+                        longPressed = false
+                        removeCallbacks(longPressRunnable)
+                    }
+                    setCommentTranslation(pullResult.offset)
+                    if (pullResult.feedback) {
+                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    }
+                    return true
+                }
                 val absX = abs(startX - event.x)
                 val absY = abs(startY - event.y)
                 if (!isMove) {
@@ -232,7 +277,14 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 callBack.screenOffTimerStart()
                 removeCallbacks(longPressRunnable)
                 if (!pressDown) return true
+                if (touchOwner == TouchOwner.COMMENT) {
+                    finishCommentGesture(cancelled = false)
+                    return true
+                }
                 pressDown = false
+                pageCommentPullController.reset()
+                pendingPageCommentEvent = null
+                touchOwner = TouchOwner.NONE
                 if (!pageDelegate!!.isMoved && !isMove) {
                     if (!longPressed && !pressOnTextSelected) {
                         if (!curPage.onClick(startX, startY)) {
@@ -252,7 +304,15 @@ class ReadView(context: Context, attrs: AttributeSet) :
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPressRunnable)
                 if (!pressDown) return true
+                if (touchOwner == TouchOwner.COMMENT) {
+                    finishCommentGesture(cancelled = true)
+                    autoPager.resume()
+                    return true
+                }
                 pressDown = false
+                pageCommentPullController.reset()
+                pendingPageCommentEvent = null
+                touchOwner = TouchOwner.NONE
                 if (isTextSelected) {
                     callBack.showTextActionMenu()
                 } else if (pageDelegate!!.isMoved) {
@@ -263,6 +323,98 @@ class ReadView(context: Context, attrs: AttributeSet) :
             }
         }
         return true
+    }
+
+    private fun canStartPageCommentGesture(): Boolean {
+        return !isScroll &&
+                !isTextSelected &&
+                !isAutoPage &&
+                !isLongScreenShot() &&
+                !callBack.isSelectingSearchResult &&
+                callBack.canOpenChapterComment &&
+                pageDelegate?.isRunning != true &&
+                !BaseReadAloudService.isPlay()
+    }
+
+    private fun cancelPageDelegate(event: MotionEvent) {
+        MotionEvent.obtain(event).also { cancelEvent ->
+            cancelEvent.action = MotionEvent.ACTION_CANCEL
+            pageDelegate?.onTouch(cancelEvent)
+            cancelEvent.recycle()
+        }
+    }
+
+    private fun finishCommentGesture(cancelled: Boolean) {
+        val result = pageCommentPullController.end(cancelled)
+        val event = pendingPageCommentEvent
+        pressDown = false
+        pressOnTextSelected = false
+        pendingPageCommentEvent = null
+        touchOwner = TouchOwner.NONE
+        removeCallbacks(longPressRunnable)
+        settleCommentTranslation {
+            pageCommentPullController.finishSettling()
+            if (result.open && event != null && callBack.canOpenChapterComment) {
+                callBack.openChapterComment(event)
+            }
+        }
+    }
+
+    private fun setCommentTranslation(offset: Float) {
+        prevPage.translationY = offset
+        curPage.translationY = offset
+        nextPage.translationY = offset
+    }
+
+    private fun settleCommentTranslation(onEnd: () -> Unit) {
+        prevPage.animate().translationY(0f).setDuration(PAGE_COMMENT_SETTLE_MS).start()
+        nextPage.animate().translationY(0f).setDuration(PAGE_COMMENT_SETTLE_MS).start()
+        curPage.animate()
+            .translationY(0f)
+            .setDuration(PAGE_COMMENT_SETTLE_MS)
+            .withEndAction(onEnd)
+            .start()
+    }
+
+    private fun cancelCommentAnimations() {
+        prevPage.animate().cancel()
+        curPage.animate().cancel()
+        nextPage.animate().cancel()
+        setCommentTranslation(0f)
+        pageCommentPullController.reset()
+        pendingPageCommentEvent = null
+    }
+
+    private fun pageCommentEventAt(x: Float): ChapterCommentEvent? {
+        val page = curPage.textPage
+        val chapter = page.textChapter
+        val rule = chapter.chapterCommentRule?.display?.page
+        if (rule?.enabled != true || page.isMsgPage || page.lines.isEmpty()) return null
+        val leftPage = if (page.doublePage) {
+            val center = width / 2f
+            if (abs(x - center) <= DOUBLE_PAGE_GUTTER_DP.dpToPx()) return null
+            x < center
+        } else {
+            null
+        }
+        val projection = chapter.pageCommentProjection(page, leftPage)
+        if (projection.isEmpty) return null
+        val count = ChapterCommentPageProjector.count(projection, rule.countField)
+        return ChapterCommentEvent.page(page, projection, count)
+    }
+
+    fun openCurrentPageComment(): Boolean {
+        val event = pageCommentEventAt(width / 2f)
+            ?: (if (curPage.textPage.doublePage) pageCommentEventAt(width / 4f) else null)
+            ?: return false
+        if (!callBack.canOpenChapterComment) return false
+        callBack.openChapterComment(event)
+        return true
+    }
+
+    fun hasCurrentPageComment(): Boolean {
+        return pageCommentEventAt(width / 2f) != null ||
+                curPage.textPage.doublePage && pageCommentEventAt(width / 4f) != null
     }
 
     fun cancelSelect(clearSearchResult: Boolean = false) {
@@ -757,7 +909,10 @@ class ReadView(context: Context, attrs: AttributeSet) :
 
     interface CallBack {
         val isInitFinish: Boolean
+        val isSelectingSearchResult: Boolean
+        val canOpenChapterComment: Boolean
         fun showActionMenu()
+        fun openChapterComment(event: ChapterCommentEvent)
         fun screenOffTimerStart()
         fun showTextActionMenu()
         fun autoPageStop()
@@ -767,5 +922,17 @@ class ReadView(context: Context, attrs: AttributeSet) :
         fun openSearchActivity(searchWord: String?)
         fun upSystemUiVisibility()
         fun sureNewProgress(progress: BookProgress)
+    }
+
+    private enum class TouchOwner {
+        NONE,
+        PAGE,
+        COMMENT,
+    }
+
+    companion object {
+        private const val PAGE_COMMENT_THRESHOLD_DP = 52
+        private const val DOUBLE_PAGE_GUTTER_DP = 8
+        private const val PAGE_COMMENT_SETTLE_MS = 180L
     }
 }

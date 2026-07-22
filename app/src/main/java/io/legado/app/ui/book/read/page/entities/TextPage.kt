@@ -12,6 +12,7 @@ import io.legado.app.help.PaintPool
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.ui.book.read.page.ContentTextView
+import io.legado.app.ui.book.read.comment.SegmentCommentOverlay
 import io.legado.app.ui.book.read.page.entities.TextChapter.Companion.emptyTextChapter
 import io.legado.app.ui.book.read.page.entities.column.TextBaseColumn
 import io.legado.app.ui.book.read.page.entities.column.TextColumn
@@ -48,9 +49,14 @@ data class TextPage(
     }
 
     val lines: List<TextLine> get() = textLines
+    private val pageBlocks = arrayListOf<TextPageBlock>()
+    private var heightBeforeBlocks: Float? = null
+    private var renderHeightBeforeBlocks: Int? = null
+    val blocks: List<TextPageBlock> get() = pageBlocks
     val lineSize: Int get() = textLines.size
-    val charSize: Int get() = text.length.coerceAtLeast(1)
-    val chapterPosition: Int get() = textLines.first().chapterPosition
+    val charSize: Int get() = if (textLines.isEmpty() && pageBlocks.isNotEmpty()) 0 else text.length.coerceAtLeast(1)
+    var fallbackChapterPosition: Int = 0
+    val chapterPosition: Int get() = textLines.firstOrNull()?.chapterPosition ?: fallbackChapterPosition
     val searchResult = hashSetOf<TextBaseColumn>()
     var isMsgPage: Boolean = false
     var canvasRecorder = CanvasRecorderFactory.create(true)
@@ -71,6 +77,7 @@ data class TextPage(
         get() {
             val paragraphs = arrayListOf<TextParagraph>()
             val lines = textLines.filter { it.paragraphNum > 0 }
+            if (lines.isEmpty()) return paragraphs
             val offset = lines.first().paragraphNum - 1
             lines.forEach { line ->
                 if (paragraphs.lastIndex < line.paragraphNum - offset - 1) {
@@ -84,6 +91,26 @@ data class TextPage(
     fun addLine(line: TextLine) {
         line.textPage = this
         textLines.add(line)
+    }
+
+    fun addBlock(block: TextPageBlock) {
+        if (pageBlocks.isEmpty()) {
+            heightBeforeBlocks = height
+            renderHeightBeforeBlocks = renderHeight
+        }
+        pageBlocks.add(block)
+        height = max(height, block.bottom + ChapterCommentPageBlock.END_PADDING)
+        upRenderHeight()
+        invalidate()
+    }
+
+    fun clearBlocks() {
+        heightBeforeBlocks?.let { height = it }
+        renderHeightBeforeBlocks?.let { renderHeight = it }
+        heightBeforeBlocks = null
+        renderHeightBeforeBlocks = null
+        pageBlocks.clear()
+        invalidate()
     }
 
     fun getLine(index: Int): TextLine {
@@ -260,6 +287,7 @@ data class TextPage(
      * @return 字符在本页位置
      */
     fun getPosByLineColumn(lineIndex: Int, columnIndex: Int): Int {
+        if (textLines.isEmpty()) return 0
         var length = 0
         val maxIndex = min(lineIndex, lineSize - 1)
         for (index in 0 until maxIndex) {
@@ -292,7 +320,8 @@ data class TextPage(
      * @return
      */
     fun containPos(chapterPos: Int): Boolean {
-        val line = lines.first()
+        val line = lines.firstOrNull()
+            ?: return blocks.isNotEmpty() && chapterPos == fallbackChapterPosition
         val startPos = line.chapterPosition
         val endPos = startPos + charSize
         return chapterPos in startPos..<endPos
@@ -333,6 +362,8 @@ data class TextPage(
                 line.draw(view, this)
             }
         }
+        SegmentCommentOverlay.draw(this, canvas)
+        blocks.forEach { it.draw(canvas) }
     }
 
     fun render(view: ContentTextView): Boolean {
@@ -365,7 +396,12 @@ data class TextPage(
     }
 
     fun upRenderHeight() {
-        renderHeight = ceil(lines.last().lineBottom).toInt()
+        renderHeight = ceil(
+            max(
+                lines.maxOfOrNull { it.lineBottom } ?: 0f,
+                blocks.maxOfOrNull { it.bottom } ?: 0f,
+            )
+        ).toInt()
         if (leftLineSize > 0 && leftLineSize != lines.size) {
             val leftHeight = ceil(lines[leftLineSize - 1].lineBottom).toInt()
             renderHeight = max(renderHeight, leftHeight)

@@ -11,6 +11,8 @@ import io.legado.app.data.entities.Bookmark
 import io.legado.app.help.book.isOnLineTxt
 import io.legado.app.help.config.AppConfig
 import io.legado.app.model.ReadBook
+import io.legado.app.model.chapterComment.ChapterCommentEvent
+import io.legado.app.ui.book.read.comment.SegmentCommentOverlay
 import io.legado.app.ui.association.OpenUrlConfirmActivity
 import io.legado.app.ui.book.read.page.delegate.PageDelegate
 import io.legado.app.ui.book.read.page.entities.TextLine
@@ -251,6 +253,7 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
         } else {
             false
         }
+        if (clickChapterComment(x, y)) return true
         var handled = false
         touch(x, y) { _, textPos, textPage, textLine, column ->
             when (column) {
@@ -318,6 +321,29 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
             }
         }
         return handled
+    }
+
+    private fun clickChapterComment(x: Float, y: Float): Boolean {
+        if (!visibleRect.contains(x, y)) return false
+        for (relativePos in 0..2) {
+            val relativeOffset = relativeOffset(relativePos)
+            if (relativePos > 0) {
+                if (!callBack.isScroll) return false
+                if (relativeOffset >= ChapterProvider.visibleHeight) return false
+            }
+            val page = relativePage(relativePos)
+            SegmentCommentOverlay.hitTest(page, x, y, relativeOffset)?.let { entry ->
+                callBack.openChapterComment(ChapterCommentEvent.segment(page, entry.anchor))
+                return true
+            }
+            page.blocks.firstOrNull { it.contains(x, y, relativeOffset) }?.let { block ->
+                if (block is io.legado.app.ui.book.read.page.entities.ChapterCommentPageBlock) {
+                    callBack.openChapterComment(ChapterCommentEvent.chapter(page, block.summary))
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     /**
@@ -752,7 +778,7 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
                 scrollY = 0
             }
 
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 longScreenshot = false
                 scrollY = 0
             }
@@ -783,5 +809,6 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
         fun onLongScreenshotTouchEvent(event: MotionEvent): Boolean
         fun oldClickImg(src: String): Boolean
         fun clickImg(click: String, src: String)
+        fun openChapterComment(event: ChapterCommentEvent)
     }
 }
