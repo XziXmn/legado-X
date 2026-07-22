@@ -5,7 +5,7 @@
 - `origin` is `https://github.com/XziXmn/legado-X.git` and is the default push target.
 - `upstream` is `https://github.com/Luoyacheng/legado-E.git` and is fetch-only.
 - The `codex/legadohub-reader` branch contains product-specific reader capabilities. Do not push it to upstream or open an upstream pull request unless the user explicitly requests that exact action.
-- Upstream features may be fetched and merged, rebased, or cherry-picked into this branch. Resolve conflicts without dropping the chapter-comment protocol, source-scoped security boundary, or package ids `io.legadox.app` / `io.legadox.app.beta`.
+- Upstream features may be fetched and merged, rebased, or cherry-picked into this branch. Resolve conflicts without dropping the chapter-comment protocol, source-scoped security boundary, or original package ids (`io.legado.app` / `.release` / `.releaseS` / `.debug`).
 - Never force-push upstream. Normal pushes also default to `origin`.
 
 ## Build Boundary

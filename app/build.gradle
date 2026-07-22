@@ -18,7 +18,7 @@ static def releaseTime() {
     return new Date().format("yy.MMddHH", TimeZone.getTimeZone("GMT+8"))
 }
 
-def name = "legadox"
+def name = "legado"
 def version = "3." + releaseTime()
 def gitCommits = Integer.parseInt('git rev-list HEAD --count'.execute().text.trim())
 
@@ -46,7 +46,8 @@ android {
         }
     }
     defaultConfig {
-        applicationId "io.legadox.app"
+        // 与原版一致，便于主题 / 图标适配识别
+        applicationId "io.legado.app"
         minSdk 21
         targetSdk 36
         versionCode 10000 + gitCommits
@@ -76,11 +77,15 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 signingConfig signingConfigs.myConfig
             }
-            // 正式版: io.legadox.app；测试版 CI 传入 -PAPP_ID_SUFFIX=.beta → io.legadox.app.beta
-            if (project.hasProperty("APP_ID_SUFFIX")) {
-                applicationIdSuffix project.property("APP_ID_SUFFIX")
+            // 测试版 io.legado.app.release；正式版 CI 改为 .releaseS → io.legado.app.releaseS
+            applicationIdSuffix '.release'
+            if (getApplicationIdSuffix() == '.releaseA') {
+                manifestPlaceholders.put("app_name", "@string/app_name_a")
+            } else if (getApplicationIdSuffix() == '.releaseS') {
+                manifestPlaceholders.put("app_name", "@string/app_name_s")
+            } else {
+                manifestPlaceholders.put("app_name", "@string/app_name")
             }
-            manifestPlaceholders.put("app_name", "@string/app_name")
 
             minifyEnabled true
             shrinkResources = true
