@@ -77,12 +77,19 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 signingConfig signingConfigs.myConfig
             }
-            // 测试版 io.legado.app.release；正式版 CI 改为 .releaseS → io.legado.app.releaseS
-            applicationIdSuffix '.release'
+            // 正式版默认 .release → io.legado.app.release
+            // 测试版 CI 传 -PAPP_ID_SUFFIX=.beta → io.legado.app.beta（不覆盖正式版）
+            if (project.hasProperty("APP_ID_SUFFIX")) {
+                applicationIdSuffix project.property("APP_ID_SUFFIX")
+            } else {
+                applicationIdSuffix '.release'
+            }
             if (getApplicationIdSuffix() == '.releaseA') {
                 manifestPlaceholders.put("app_name", "@string/app_name_a")
             } else if (getApplicationIdSuffix() == '.releaseS') {
                 manifestPlaceholders.put("app_name", "@string/app_name_s")
+            } else if (getApplicationIdSuffix() == '.beta') {
+                manifestPlaceholders.put("app_name", "@string/app_name_beta")
             } else {
                 manifestPlaceholders.put("app_name", "@string/app_name")
             }

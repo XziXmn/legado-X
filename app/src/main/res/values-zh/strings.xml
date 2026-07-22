@@ -1,6 +1,7 @@
 <resources>
     <!--App-->
     <string name="app_name">阅读</string>
+    <string name="app_name_beta">阅读·测试</string>
     <string name="app_name_a">阅读·A</string>
     <string name="app_name_s">阅读Plus</string>
     <string name="receiving_shared_label">阅读·搜索</string>

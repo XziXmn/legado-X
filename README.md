@@ -9,8 +9,8 @@
 
 [GitHub Releases](https://github.com/XziXmn/legado-X/releases)
 
-- 应用名：阅读  
-- 包名：`io.legado.app.release`（与常见「阅读」一致，可覆盖安装）  
+- 正式版：应用名「阅读」，包名 `io.legado.app.release`（可覆盖常见安装）  
+- 测试版：应用名「阅读·测试」，包名 `io.legado.app.beta`（独立安装，不覆盖正式版）  
 - 签名：公开测试密钥  
 - 软件不提供内容，书源等需自行导入  
 

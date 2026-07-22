@@ -136,9 +136,13 @@ jobs:
           echo "body=$CONTENT_JSON" >> $GITHUB_OUTPUT
       - id: set-matrix
         run: |
-          # 手机主流安装包为 io.legado.app.release；正式/测试都只打这一包名，便于覆盖
-          # 是否「正式 Release」仍由 updateLog 是否更新决定（GitHub tag / prerelease）
-          echo 'build_matrix={"product":["app"],"type":["release"]}' >> $GITHUB_OUTPUT
+          # 正式版: io.legado.app.release（可覆盖常见「阅读」）
+          # 测试版: io.legado.app.beta（独立包名 +「阅读·测试」显示名，不覆盖正式版）
+          if [ "${{ steps.updateLog.outputs.updated }}" == "yes" ]; then
+            echo 'build_matrix={"product":["app"],"type":["release"]}' >> $GITHUB_OUTPUT
+          else
+            echo 'build_matrix={"product":["app"],"type":["beta"]}' >> $GITHUB_OUTPUT
+          fi
 
   build:
     needs: prepare
@@ -181,18 +185,20 @@ jobs:
       - name: Build With Gradle
         continue-on-error: true
         run: |
-          # 固定 io.legado.app.release（与常见「阅读」安装包一致）
-          if [ "${{ needs.prepare.outputs.updateLog_updated }}" == "yes" ]; then
-            channel="release"
-          else
+          GRADLE_EXTRA=""
+          if [ "${{ env.type }}" == 'beta' ]; then
             channel="beta"
+            packageId="io.legado.app.beta"
+            GRADLE_EXTRA="-PAPP_ID_SUFFIX=.beta"
+          else
+            channel="release"
+            packageId="io.legado.app.release"
           fi
-          packageId="io.legado.app.release"
           echo "统一版本号"
           sed "/def version/c def version = \"${{ env.VERSION }}\"" $GITHUB_WORKSPACE/app/build.gradle -i
           echo "开始构建 ${{ env.product }} channel=$channel packageId=$packageId"
           chmod +x gradlew
-          ./gradlew assemble${{ env.product }}Release --build-cache --parallel --daemon --warning-mode all
+          ./gradlew assemble${{ env.product }}Release $GRADLE_EXTRA --build-cache --parallel --daemon --warning-mode all
           echo "修改APK文件名"
           mkdir -p ${{ github.workspace }}/apk/
           for file in `ls ${{ github.workspace }}/app/build/outputs/apk/*/*/*.apk`; do
@@ -278,7 +284,7 @@ jobs:
             ### 更新内容
             ${{ fromJSON(needs.prepare.outputs.updateLog_content) }}
 
-            包名：`io.legado.app.release`（可覆盖常见「阅读」安装）
+            包名：`io.legado.app.release`（正式版，可覆盖常见「阅读」）
           prerelease: false
           files: ${{ github.workspace }}/apk/*.apk
           fail_on_unmatched_files: true
@@ -310,7 +316,7 @@ jobs:
             ### 更新内容
             ${{ fromJSON(needs.prepare.outputs.updateLog_content) }}
 
-            包名：`io.legado.app.release`（可覆盖常见「阅读」安装）
+            包名：`io.legado.app.beta`（测试版「阅读·测试」，不覆盖正式版）
           prerelease: true
           files: ${{ github.workspace }}/apk/*.apk
           fail_on_unmatched_files: true
