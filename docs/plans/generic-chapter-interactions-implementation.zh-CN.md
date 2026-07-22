@@ -6,7 +6,7 @@
 
 - 已实现来源无关的 v1 协议、能力探测、独立缓存、相邻章摘要预加载、锚点解析、真实分页投影、段级 overlay、页级下拉、章末 block 和滚动模式菜单入口。
 - 已实现 `SOURCE_SCOPED` 动作弹窗：动作与摘要规则同源、认证源 DNS 固定、跨源只允许公网 HTTPS 且剥离凭据、系统 TLS 校验、重定向逐跳校验、固定 `0.78` 高度。
-- 应用身份与上游一致：Release `io.legado.app.release`，Debug `io.legado.app.debug`，中文应用名“阅读”。
+- 应用名“阅读”；包名 `io.legadox.app`（Debug / Release 带后缀），可与原版 / 上游并存。
 - 已完成 LegadoHub 首个适配：增强客户端纯正文；普通客户端只追加章末兼容入口；评论数据继续由 Catalog 和插件体系提供。
 - 自动验证结果：Legado-E `test`、`lint`、`assembleAppDebug`、`assembleAppRelease` 均通过；LegadoHub 定向测试 `24 passed`，完整门禁 `383 passed, 5 skipped`，22 个插件校验和前端 `70 passed` 均通过。
 - 未完成项仅为需要设备的 `connectedAppDebugAndroidTest` 与本文第 7 阶段真机矩阵；它们由人工测试承担，不阻断测试版 APK 交付，但阻断正式发布结论。

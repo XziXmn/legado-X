@@ -10,7 +10,7 @@
 - 书源可通过 ContentRule.chapterComment 声明协议；客户端零站点特判
 - 新增 java.hasReaderCapability 能力探测，普通客户端可降级兼容
 - 评论动作 WebView 采用来源作用域安全策略
-- 应用身份与上游一致：包名 io.legado.app，中文名「阅读」
+- 应用名「阅读」；包名 io.legadox.app（可与原版 / 上游并存）
 
 **2026/07/15**
 - 新增导出链接为口令、自动识别口令导入
