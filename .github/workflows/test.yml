@@ -136,10 +136,11 @@ jobs:
           echo "body=$CONTENT_JSON" >> $GITHUB_OUTPUT
       - id: set-matrix
         run: |
+          # 正式版: io.legadox.app（无后缀）；测试版: io.legadox.app.beta（单包，不再打 plus/共存）
           if [ "${{ steps.updateLog.outputs.updated }}" == "yes" ]; then
-            echo 'build_matrix={"product":["app"],"type":["release","releaseS"]}' >> $GITHUB_OUTPUT
+            echo 'build_matrix={"product":["app"],"type":["stable"]}' >> $GITHUB_OUTPUT
           else
-            echo 'build_matrix={"product":["app"],"type":["release"]}' >> $GITHUB_OUTPUT
+            echo 'build_matrix={"product":["app"],"type":["beta"]}' >> $GITHUB_OUTPUT
           fi
 
   build:
@@ -183,26 +184,24 @@ jobs:
       - name: Build With Gradle
         continue-on-error: true
         run: |
-          if [ "${{ env.type }}" == 'release' ]; then
-            typeName="原包名"
-          else
-            typeName="共存"
-            sed "s/'.release'/'.releaseS'/" $GITHUB_WORKSPACE/app/build.gradle  -i
-            # sed 's/.release/.releaseS/'     $GITHUB_WORKSPACE/app/google-services.json -i
-          fi
           echo "统一版本号"
           sed "/def version/c def version = \"${{ env.VERSION }}\"" $GITHUB_WORKSPACE/app/build.gradle  -i
-          echo "开始${{ env.product }}$typeName构建"
+          GRADLE_EXTRA=""
+          if [ "${{ env.type }}" == 'beta' ]; then
+            channel="beta"
+            packageId="io.legadox.app.beta"
+            GRADLE_EXTRA="-PAPP_ID_SUFFIX=.beta"
+          else
+            channel="stable"
+            packageId="io.legadox.app"
+          fi
+          echo "开始构建 ${{ env.product }} channel=$channel packageId=$packageId"
           chmod +x gradlew
-          ./gradlew assemble${{ env.product }}release --build-cache --parallel --daemon --warning-mode all
+          ./gradlew assemble${{ env.product }}Release $GRADLE_EXTRA --build-cache --parallel --daemon --warning-mode all
           echo "修改APK文件名"
           mkdir -p ${{ github.workspace }}/apk/
           for file in `ls ${{ github.workspace }}/app/build/outputs/apk/*/*/*.apk`; do
-            if [ "${{ env.type }}" == 'release' ]; then
-              mv "$file" ${{ github.workspace }}/apk/legado_测试版_${{ env.VERSIONL }}_$typeName.apk
-            else
-              mv "$file" ${{ github.workspace }}/apk/legado_正式版_${{ env.VERSIONL }}_$typeName.apk
-            fi
+            mv "$file" ${{ github.workspace }}/apk/legadox_${channel}_${{ env.VERSIONL }}.apk
           done
           echo "移动mapping文件"
           mkdir -p ${{ github.workspace }}/mapping/
@@ -232,7 +231,7 @@ jobs:
             exit 1
           fi
           cd ${{ github.workspace }}/apk/
-          if [ ! -e legado_*.apk ]; then
+          if [ ! -e legadox_*.apk ]; then
             echo "Build production not found! Check gradle logs."
             exit 1
           fi
@@ -272,24 +271,19 @@ jobs:
         run: |
           mv */*.apk .
           rm -rf */
-
-          for file in `ls *.apk`; do
-            if [[ "$file" == *原包名* ]]; then
-              mv "$file" $(echo $file | sed -e s/原包名/release/ -e s/测试版/beta/)
-            else
-              mv "$file" $(echo $file | sed -e s/共存/releaseS/ -e s/正式版/plus/)
-            fi
-          done
+          ls -la
 
       - name: Publish Official Release
         if: needs.prepare.outputs.updateLog_updated == 'yes'
         uses: softprops/action-gh-release@v2
         with:
-          name: legado_app_${{ env.VERSION }}
+          name: legadox_${{ env.VERSION }}
           tag_name: ${{ env.VERSION }}
           body: |
             ### 更新内容
             ${{ fromJSON(needs.prepare.outputs.updateLog_content) }}
+
+            包名：`io.legadox.app`（正式版）
           prerelease: false
           files: ${{ github.workspace }}/apk/*.apk
           fail_on_unmatched_files: true
@@ -315,11 +309,13 @@ jobs:
         if: needs.prepare.outputs.updateLog_updated != 'yes'
         uses: softprops/action-gh-release@v2
         with:
-          name: legado_app_${{ env.VERSION }}
+          name: legadox_${{ env.VERSION }}_beta
           tag_name: beta
           body: |
             ### 更新内容
             ${{ fromJSON(needs.prepare.outputs.updateLog_content) }}
+
+            包名：`io.legadox.app.beta`（测试版）
           prerelease: true
           files: ${{ github.workspace }}/apk/*.apk
           fail_on_unmatched_files: true
@@ -363,22 +359,11 @@ jobs:
         run: |
           mv */*.apk .
           rm -rf */
-          has_plus=false
-          for file in `ls *.apk`; do
-            if [[ "$file" == *原包名* ]]; then
-              mv "$file" $(echo $file | sed s/原包名/beta/)
-            else
-              mv "$file" $(echo $file | sed s/共存/plus/)
-              has_plus=true
-            fi
-          done
-          tags=""
-          if [ "$has_plus" = true ]; then
-            tags="#beta #plus"
+          if ls *beta*.apk >/dev/null 2>&1; then
+            echo "TAGS=#legadox #beta" >> $GITHUB_OUTPUT
           else
-            tags="#beta"
+            echo "TAGS=#legadox #stable" >> $GITHUB_OUTPUT
           fi
-          echo "TAGS=$tags" >> $GITHUB_OUTPUT
       - name: Post to channel
         continue-on-error: true
         uses: xireiki/channel-post@v1
@@ -389,7 +374,7 @@ jobs:
             版本号：${{ needs.prepare.outputs.versionL }}
             更新内容：
             ${{ fromJSON(needs.prepare.outputs.updateLog_content) }}
-            #阅读 #Legado #阅读Sigma ${{ steps.set-tags.outputs.TAGS }}
+            #legado-X ${{ steps.set-tags.outputs.TAGS }}
           path: apk/*
           method: sendFile
 
@@ -405,14 +390,7 @@ jobs:
         run: |
           mv */*.apk .
           rm -rf */
-
-          for file in `ls *.apk`; do
-            if [[ "$file" == *原包名* ]]; then
-              mv "$file" $(echo $file | sed s/原包名/release/)
-            else
-              mv "$file" $(echo $file | sed s/共存/releaseS/)
-            fi
-          done
+          ls -la
 
       - name: Upload to Gitee Release
         continue-on-error: true
@@ -432,12 +410,12 @@ jobs:
           if [ "$UPDATE_UPDATED" = "yes" ]; then
             TAG_NAME="$VERSION"
             PRERELEASE="false"
-            RELEASE_NAME="legado_app_$VERSION"
+            RELEASE_NAME="legadox_$VERSION"
             echo "🚀 发布正式版: $TAG_NAME"
           else
             TAG_NAME="beta"
             PRERELEASE="true"
-            RELEASE_NAME="legado_app_$VERSION"
+            RELEASE_NAME="legadox_${VERSION}_beta"
             echo "🧪 发布预发布版: $TAG_NAME"
           fi
 
@@ -514,22 +492,23 @@ jobs:
 
   update-storage:
     needs: [prepare, build]
+    # 上游专用分发；本 fork 通常无 S_GITHUB_TOKEN，会 skip
     if: github.event_name != 'pull_request'&& needs.prepare.outputs.sgithub == 'yes' && needs.prepare.outputs.updateLog_updated == 'yes'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: legado.app.releaseS
-          path: ./apk-releaseS
+          name: legado.app.stable
+          path: ./apk-stable
 
-      - name: Check releaseS APK exists
+      - name: Check stable APK exists
         id: check-apk
         run: |
-          if ls ./apk-releaseS/*.apk 1> /dev/null 2>&1; then
-            echo "releaseS APK found"
+          if ls ./apk-stable/*.apk 1> /dev/null 2>&1; then
+            echo "stable APK found"
             echo "apk_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "releaseS APK not found"
+            echo "stable APK not found"
             echo "apk_exists=false" >> $GITHUB_OUTPUT
           fi
 
@@ -537,16 +516,11 @@ jobs:
         continue-on-error: true
         if: steps.check-apk.outputs.apk_exists == 'true'
         run: |
-          # 设置Git配置
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          # 克隆目标仓库
           git clone https://${{ secrets.S_GITHUB_TOKEN }}@github.com/Luoyacheng/yuedu.git yuedu-repo
-          # 创建目录（如果不存在）
           mkdir -p yuedu-repo/sigma
-          # 复制releaseS APK文件并重命名
-          cp ./apk-releaseS/*.apk yuedu-repo/sigma/leagado_Sigma_正式版.apk
-          # 提交更改
+          cp ./apk-stable/*.apk yuedu-repo/sigma/leagado_Sigma_正式版.apk
           cd yuedu-repo
           git add sigma/leagado_Sigma_正式版.apk
           git commit -m "Update sigma.apk to version ${{ needs.prepare.outputs.versionL }}"

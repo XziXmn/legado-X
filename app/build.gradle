@@ -76,14 +76,11 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 signingConfig signingConfigs.myConfig
             }
-            applicationIdSuffix '.release'
-            if (getApplicationIdSuffix() == '.releaseA') {
-                manifestPlaceholders.put("app_name", "@string/app_name_a")
-            } else if (getApplicationIdSuffix() == '.releaseS') {
-                manifestPlaceholders.put("app_name", "@string/app_name_s")
-            } else {
-                manifestPlaceholders.put("app_name", "@string/app_name")
+            // 正式版: io.legadox.app；测试版 CI 传入 -PAPP_ID_SUFFIX=.beta → io.legadox.app.beta
+            if (project.hasProperty("APP_ID_SUFFIX")) {
+                applicationIdSuffix project.property("APP_ID_SUFFIX")
             }
+            manifestPlaceholders.put("app_name", "@string/app_name")
 
             minifyEnabled true
             shrinkResources = true

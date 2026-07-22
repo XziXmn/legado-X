@@ -10,8 +10,9 @@
 [GitHub Releases](https://github.com/XziXmn/legado-X/releases)
 
 - 应用名：阅读  
-- 包名：`io.legadox.app`（可与原版 / 上游并存）  
-- 签名：公开测试密钥（与上游开源分发方式一致）  
+- 正式版包名：`io.legadox.app`  
+- 测试版包名：`io.legadox.app.beta`  
+- 签名：公开测试密钥  
 - 软件不提供内容，书源等需自行导入  
 
 ## 独占功能
