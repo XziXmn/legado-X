@@ -136,13 +136,9 @@ jobs:
           echo "body=$CONTENT_JSON" >> $GITHUB_OUTPUT
       - id: set-matrix
         run: |
-          # 与原版包名一致；每次只打一个包
-          # 正式版: io.legado.app.releaseS；测试版: io.legado.app.release
-          if [ "${{ steps.updateLog.outputs.updated }}" == "yes" ]; then
-            echo 'build_matrix={"product":["app"],"type":["releaseS"]}' >> $GITHUB_OUTPUT
-          else
-            echo 'build_matrix={"product":["app"],"type":["release"]}' >> $GITHUB_OUTPUT
-          fi
+          # 手机主流安装包为 io.legado.app.release；正式/测试都只打这一包名，便于覆盖
+          # 是否「正式 Release」仍由 updateLog 是否更新决定（GitHub tag / prerelease）
+          echo 'build_matrix={"product":["app"],"type":["release"]}' >> $GITHUB_OUTPUT
 
   build:
     needs: prepare
@@ -185,14 +181,13 @@ jobs:
       - name: Build With Gradle
         continue-on-error: true
         run: |
-          if [ "${{ env.type }}" == 'release' ]; then
-            channel="beta"
-            packageId="io.legado.app.release"
+          # 固定 io.legado.app.release（与常见「阅读」安装包一致）
+          if [ "${{ needs.prepare.outputs.updateLog_updated }}" == "yes" ]; then
+            channel="release"
           else
-            channel="plus"
-            packageId="io.legado.app.releaseS"
-            sed "s/'.release'/'.releaseS'/" $GITHUB_WORKSPACE/app/build.gradle -i
+            channel="beta"
           fi
+          packageId="io.legado.app.release"
           echo "统一版本号"
           sed "/def version/c def version = \"${{ env.VERSION }}\"" $GITHUB_WORKSPACE/app/build.gradle -i
           echo "开始构建 ${{ env.product }} channel=$channel packageId=$packageId"
@@ -283,7 +278,7 @@ jobs:
             ### 更新内容
             ${{ fromJSON(needs.prepare.outputs.updateLog_content) }}
 
-            包名：`io.legado.app.releaseS`（正式版 / plus，与原版一致）
+            包名：`io.legado.app.release`（可覆盖常见「阅读」安装）
           prerelease: false
           files: ${{ github.workspace }}/apk/*.apk
           fail_on_unmatched_files: true
@@ -315,7 +310,7 @@ jobs:
             ### 更新内容
             ${{ fromJSON(needs.prepare.outputs.updateLog_content) }}
 
-            包名：`io.legado.app.release`（测试版 / beta，与原版一致）
+            包名：`io.legado.app.release`（可覆盖常见「阅读」安装）
           prerelease: true
           files: ${{ github.workspace }}/apk/*.apk
           fail_on_unmatched_files: true
@@ -362,7 +357,7 @@ jobs:
           if ls *beta*.apk >/dev/null 2>&1; then
             echo "TAGS=#legado #beta" >> $GITHUB_OUTPUT
           else
-            echo "TAGS=#legado #plus" >> $GITHUB_OUTPUT
+            echo "TAGS=#legado #release" >> $GITHUB_OUTPUT
           fi
       - name: Post to channel
         continue-on-error: true
@@ -498,17 +493,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: legado.app.releaseS
-          path: ./apk-releaseS
+          name: legado.app.release
+          path: ./apk-release
 
-      - name: Check releaseS APK exists
+      - name: Check release APK exists
         id: check-apk
         run: |
-          if ls ./apk-releaseS/*.apk 1> /dev/null 2>&1; then
-            echo "releaseS APK found"
+          if ls ./apk-release/*.apk 1> /dev/null 2>&1; then
+            echo "release APK found"
             echo "apk_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "releaseS APK not found"
+            echo "release APK not found"
             echo "apk_exists=false" >> $GITHUB_OUTPUT
           fi
 
@@ -520,7 +515,7 @@ jobs:
           git config --global user.email "github-actions@github.com"
           git clone https://${{ secrets.S_GITHUB_TOKEN }}@github.com/Luoyacheng/yuedu.git yuedu-repo
           mkdir -p yuedu-repo/sigma
-          cp ./apk-releaseS/*.apk yuedu-repo/sigma/leagado_Sigma_正式版.apk
+          cp ./apk-release/*.apk yuedu-repo/sigma/leagado_Sigma_正式版.apk
           cd yuedu-repo
           git add sigma/leagado_Sigma_正式版.apk
           git commit -m "Update sigma.apk to version ${{ needs.prepare.outputs.versionL }}"

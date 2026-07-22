@@ -10,8 +10,7 @@
 [GitHub Releases](https://github.com/XziXmn/legado-X/releases)
 
 - 应用名：阅读  
-- 测试版包名：`io.legado.app.release`（与原版一致，便于主题 / 图标适配）  
-- 正式版包名：`io.legado.app.releaseS`（与原版 plus 一致）  
+- 包名：`io.legado.app.release`（与常见「阅读」一致，可覆盖安装）  
 - 签名：公开测试密钥  
 - 软件不提供内容，书源等需自行导入  
 
