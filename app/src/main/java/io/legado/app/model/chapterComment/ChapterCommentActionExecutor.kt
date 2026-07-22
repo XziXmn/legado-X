@@ -8,7 +8,6 @@ import io.legado.app.data.entities.rule.ChapterCommentRule
 import io.legado.app.help.http.CookieManager
 import io.legado.app.help.http.CookieStore
 import io.legado.app.model.analyzeRule.AnalyzeUrl
-import io.legado.app.utils.GSON
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
@@ -34,7 +33,8 @@ class ChapterCommentActionExecutor {
     ): ChapterCommentWebPage = withContext(IO) {
         val actionRule = rule.action?.trim()?.takeIf(String::isNotEmpty)
             ?: throw IllegalArgumentException("Chapter comment action rule is empty")
-        val eventJson = GSON.toJson(event)
+        // Literal contract keys; never GSON.toJson(event) under R8 field renaming.
+        val eventJson = event.toContractJson()
         val actionJson = if (actionRule.startsWith('{')) {
             actionRule
         } else {

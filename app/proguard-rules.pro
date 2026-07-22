@@ -61,6 +61,9 @@
 -keep class * extends io.legado.app.help.JsExtensions{*;}
 # 数据类
 -keep class **.data.entities.**{*;}
+# Chapter-comment protocol DTOs are handed to book-source JS as JSON strings.
+# Keep class/members so accidental GSON usage cannot rename contract fields.
+-keep class io.legado.app.model.chapterComment.**{*;}
 # hutool-core hutool-crypto
 -keep class
 !cn.hutool.core.util.RuntimeUtil,

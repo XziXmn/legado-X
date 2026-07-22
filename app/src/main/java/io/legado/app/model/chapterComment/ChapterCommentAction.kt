@@ -24,6 +24,32 @@ data class ChapterCommentEvent(
         require(segmentIds.size <= ChapterCommentParser.MAX_SEGMENTS) { "Too many segmentIds" }
     }
 
+    /**
+     * Stable contract JSON for book-source action JS.
+     *
+     * Must use literal property names — do not serialize this data class via
+     * reflective GSON under R8 minify, or field names may be renamed and the
+     * source will throw `unsupported chapter comment scope`.
+     */
+    fun toContractJson(): String {
+        val root = JsonObject().apply {
+            addProperty("scope", scope)
+            addProperty("chapterIndex", chapterIndex)
+            addProperty("pageIndex", pageIndex)
+            if (segmentId != null) {
+                addProperty("segmentId", segmentId)
+            }
+            add("segmentIds", JsonArray().apply {
+                segmentIds.forEach { add(it) }
+            })
+            addProperty("count", count)
+            if (actionData != null && !actionData.isJsonNull) {
+                add("actionData", actionData.deepCopy())
+            }
+        }
+        return GSONStrict.toJson(root)
+    }
+
     companion object {
         const val SCOPE_SEGMENT = "segment"
         const val SCOPE_PAGE = "page"

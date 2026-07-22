@@ -1,6 +1,8 @@
 package io.legado.app
 
+import com.google.gson.JsonParser
 import io.legado.app.model.chapterComment.ChapterCommentActionParser
+import io.legado.app.model.chapterComment.ChapterCommentEvent
 import io.legado.app.model.chapterComment.SourceScopedDns
 import io.legado.app.model.chapterComment.SourceScopedInitialDocumentGate
 import io.legado.app.model.chapterComment.SourceScopedRequestPolicy
@@ -62,6 +64,52 @@ class ChapterCommentInteractionTest {
         assertEquals("sourceWebView", action.type)
         assertEquals(0.78f, action.heightRatio)
         assertFails { ChapterCommentActionParser.parse("""{"type":"native","url":"https://example.test"}""") }
+    }
+
+    @Test
+    fun chapterCommentEventContractJsonUsesStableLiteralKeys() {
+        val segment = ChapterCommentEvent(
+            scope = ChapterCommentEvent.SCOPE_SEGMENT,
+            chapterIndex = 3,
+            pageIndex = 1,
+            segmentId = "p-10",
+            segmentIds = listOf("p-10"),
+            count = 4,
+        )
+        val page = ChapterCommentEvent(
+            scope = ChapterCommentEvent.SCOPE_PAGE,
+            chapterIndex = 3,
+            pageIndex = 1,
+            segmentIds = listOf("p-10", "p-11"),
+            count = 7,
+        )
+        val chapter = ChapterCommentEvent(
+            scope = ChapterCommentEvent.SCOPE_CHAPTER,
+            chapterIndex = 3,
+            pageIndex = 2,
+            count = 12,
+        )
+
+        val segmentJson = JsonParser.parseString(segment.toContractJson()).asJsonObject
+        val pageJson = JsonParser.parseString(page.toContractJson()).asJsonObject
+        val chapterJson = JsonParser.parseString(chapter.toContractJson()).asJsonObject
+
+        assertEquals("segment", segmentJson.get("scope").asString)
+        assertEquals("p-10", segmentJson.get("segmentId").asString)
+        assertEquals(3, segmentJson.get("chapterIndex").asInt)
+        assertEquals(1, segmentJson.get("pageIndex").asInt)
+        assertEquals(4, segmentJson.get("count").asInt)
+        assertTrue(segmentJson.getAsJsonArray("segmentIds").any { it.asString == "p-10" })
+
+        assertEquals("page", pageJson.get("scope").asString)
+        assertEquals(2, pageJson.getAsJsonArray("segmentIds").size())
+        assertFalse(pageJson.has("segmentId"))
+
+        assertEquals("chapter", chapterJson.get("scope").asString)
+        assertEquals(12, chapterJson.get("count").asInt)
+        // Book-source action scripts key on these exact property names.
+        assertTrue(segment.toContractJson().contains("\"scope\""))
+        assertTrue(page.toContractJson().contains("\"segmentIds\""))
     }
 
     @Test

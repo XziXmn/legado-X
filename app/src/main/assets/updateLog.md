@@ -3,10 +3,10 @@
 ## cronet版本: 128.0.6613.40
 
 **2026/07/23**
+- 修复 Release 下点击段评/页热评/本章说报 `unsupported chapter comment scope`（action 事件用固定 JSON 键名，避免 R8 混淆字段）
 - 页热评下拉对齐起点：整页（含标题/热评）同步竖滑，prev/curr/next 同位移后回弹
 - 跟踪阶段不喂翻页、清理截图，避免下拉时叠层闪烁
 - 章节评论严格使用通用 v2 协议；`hasReaderCapability` 精确匹配版本 2
-- 补充 JS 帮助与文档：书源须探测 `chapter-comments` / 2，普通客户端不显示评论入口
 - 正式版：阅读 / `io.legado.app.release`（可覆盖常见安装）
 - 测试版：阅读·测试 / `io.legado.app.beta`（独立安装，不覆盖正式版）
 
