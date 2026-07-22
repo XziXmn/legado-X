@@ -1,6 +1,6 @@
 # legado-X
 
-基于 [Legado-E](https://github.com/Luoyacheng/legado-E) / [Legado](https://github.com/gedoor/legado) 的开源阅读客户端，在通用书源阅读能力之上增加**章节评论**（段级 / 页热评 / 章末）。
+基于 [Legado-E](https://github.com/Luoyacheng/legado-E) / [Legado](https://github.com/gedoor/legado) 的个人修改版。
 
 [![Releases](https://img.shields.io/github/v/release/XziXmn/legado-X?include_prereleases)](https://github.com/XziXmn/legado-X/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
@@ -14,29 +14,13 @@
 - 签名：公开测试密钥（与上游开源分发方式一致）  
 - 软件不提供内容，书源等需自行导入  
 
-## 本仓库改动
+## 独占功能
 
-- 通用章节评论协议（`ContentRule.chapterComment`）
-- `java.hasReaderCapability("chapter-comments", 1)` 能力探测
-- 评论 WebView 来源作用域安全策略  
+- 阅读页支持章节评论：段落旁入口、本页热评下拉、章末评论入口
+- 书源可声明评论能力；不支持的客户端会自动降级，不影响正常阅读
+- 打开评论时尽量沿用书源登录状态，并限制不安全的跨站访问  
 
-说明：[架构 ADR](docs/architecture/0001-generic-chapter-interactions.zh-CN.md) · [更新日志](app/src/main/assets/updateLog.md)
-
-## 构建
-
-```bash
-./gradlew :app:assembleAppDebug
-./gradlew :app:assembleAppRelease   # 需配置公开测试密钥，见 .github/workflows
-```
-
-## 上游
-
-| 远端 | 用途 |
-|---|---|
-| `origin` → [XziXmn/legado-X](https://github.com/XziXmn/legado-X) | 推送与发版 |
-| `upstream` → [Luoyacheng/legado-E](https://github.com/Luoyacheng/legado-E) | 仅同步，默认不推送 |
-
-详见 [AGENTS.md](AGENTS.md)。API 见 [api.md](api.md)。
+[更新日志](app/src/main/assets/updateLog.md)
 
 ## 免责声明
 
