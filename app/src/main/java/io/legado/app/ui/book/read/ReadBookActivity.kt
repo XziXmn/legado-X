@@ -58,6 +58,8 @@ import io.legado.app.lib.dialogs.selector
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
+import io.legado.app.model.chapterComment.ChapterCommentActionExecutor
+import io.legado.app.model.chapterComment.ChapterCommentEvent
 import io.legado.app.model.analyzeRule.AnalyzeRule
 import io.legado.app.model.analyzeRule.AnalyzeRule.Companion.setChapter
 import io.legado.app.model.analyzeRule.AnalyzeRule.Companion.setCoroutineContext
@@ -104,6 +106,7 @@ import io.legado.app.ui.replace.ReplaceRuleActivity
 import io.legado.app.ui.replace.edit.ReplaceEditActivity
 import io.legado.app.ui.widget.PopupAction
 import io.legado.app.ui.widget.dialog.PhotoDialog
+import io.legado.app.ui.widget.dialog.BottomWebViewDialog
 import io.legado.app.utils.ACache
 import io.legado.app.utils.Debounce
 import io.legado.app.utils.LogUtils
@@ -222,6 +225,8 @@ class ReadBookActivity : BaseReadBookActivity(),
     }
     private var menu: Menu? = null
     private var backupJob: Job? = null
+    private var chapterCommentActionJob: Job? = null
+    private val chapterCommentActionExecutor = ChapterCommentActionExecutor()
     private var tts: TTS? = null
     val textActionMenu: TextActionMenu by lazy {
         TextActionMenu(this, this)
@@ -230,6 +235,10 @@ class ReadBookActivity : BaseReadBookActivity(),
         PopupAction(this)
     }
     override val isInitFinish: Boolean get() = viewModel.isInitFinish
+    override val canOpenChapterComment: Boolean
+        get() = chapterCommentActionJob?.isActive != true &&
+                supportFragmentManager.findFragmentByTag(CHAPTER_COMMENT_DIALOG_TAG)
+                    ?.let { it.isAdded && !it.isRemoving } != true
     override val isScroll: Boolean get() = binding.readView.isScroll
     private val isAutoPage get() = binding.readView.isAutoPage
     override var isShowingSearchResult = false
@@ -1342,6 +1351,56 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
     }
 
+    override fun canOpenCurrentPageComment(): Boolean {
+        return isScroll && binding.readView.hasCurrentPageComment() && canOpenChapterComment
+    }
+
+    override fun openCurrentPageComment() {
+        binding.readMenu.runMenuOut {
+            binding.readView.openCurrentPageComment()
+        }
+    }
+
+    override fun openChapterComment(event: ChapterCommentEvent) {
+        if (!canOpenChapterComment) return
+        val source = ReadBook.bookSource ?: return
+        val book = ReadBook.book ?: return
+        val rule = source.getContentRule().chapterComment ?: return
+        chapterCommentActionJob = lifecycleScope.launch {
+            try {
+                val chapter = withContext(IO) {
+                    appDb.bookChapterDao.getChapter(book.bookUrl, event.chapterIndex)
+                } ?: throw NoStackTraceException("no chapter")
+                val page = chapterCommentActionExecutor.resolveAndLoad(
+                    source = source,
+                    book = book,
+                    chapter = chapter,
+                    rule = rule,
+                    event = event,
+                )
+                if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@launch
+                if (supportFragmentManager.findFragmentByTag(CHAPTER_COMMENT_DIALOG_TAG) != null) {
+                    return@launch
+                }
+                BottomWebViewDialog(
+                    sourceKey = source.bookSourceUrl,
+                    bookType = BookType.text,
+                    url = page.finalUrl,
+                    html = page.html,
+                    securityMode = BottomWebViewDialog.SecurityMode.SOURCE_SCOPED,
+                    sourceScopedNetworkContext = page.networkContext,
+                ).show(supportFragmentManager, CHAPTER_COMMENT_DIALOG_TAG)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                AppLog.put("打开章节评论失败", error)
+                toastOnUi("评论加载失败，请稍后重试")
+            } finally {
+                chapterCommentActionJob = null
+            }
+        }
+    }
+
     /**
      * 点击图片
      */
@@ -1853,6 +1912,7 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     companion object {
         const val RESULT_DELETED = 100
+        private const val CHAPTER_COMMENT_DIALOG_TAG = "chapterCommentSourceWebView"
     }
 
 }

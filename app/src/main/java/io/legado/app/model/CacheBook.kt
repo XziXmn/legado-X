@@ -325,13 +325,16 @@ object CacheBook {
                 waitDownloadSet.remove(chapterIndex)
                 return
             }
-            if (BookHelp.hasImageContent(book, chapter)) {
+            if (
+                BookHelp.hasUsableContent(book, chapter, bookSource) &&
+                BookHelp.hasImageContent(book, chapter)
+            ) {
                 waitDownloadSet.remove(chapterIndex)
                 return
             }
             waitDownloadSet.remove(chapterIndex)
             onDownloadSet.add(chapterIndex)
-            if (BookHelp.hasContent(book, chapter)) {
+            if (BookHelp.hasUsableContent(book, chapter, bookSource)) {
                 Coroutine.async(scope, context, executeContext = context) {
                     BookHelp.getContent(book, chapter)?.let {
                         BookHelp.saveImages(bookSource, book, chapter, it, 1)
@@ -368,7 +371,9 @@ object CacheBook {
                 //出现错误等待一秒后重新加入待下载列表
                 delay(1000)
                 onPostError(chapter, it)
-                downloadFinish(chapter, "获取正文失败\n${it.localizedMessage}")
+                val fallback = BookHelp.getContent(book, chapter)
+                    ?: "获取正文失败\n${it.localizedMessage}"
+                downloadFinish(chapter, fallback)
             }.onCancel {
                 onCancel(chapterIndex)
             }.onFinally {
@@ -396,7 +401,8 @@ object CacheBook {
                 onError(chapter, e)
                 ReadBook.downloadFailChapters[chapter.index] =
                     (ReadBook.downloadFailChapters[chapter.index] ?: 0) + 1
-                return "获取正文失败\n${e.localizedMessage}"
+                return BookHelp.getContent(book, chapter)
+                    ?: "获取正文失败\n${e.localizedMessage}"
             } finally {
                 postEvent(EventBus.UP_DOWNLOAD, book.bookUrl)
             }
@@ -431,7 +437,9 @@ object CacheBook {
                 onError(chapter, it)
                 ReadBook.downloadFailChapters[chapter.index] =
                     (ReadBook.downloadFailChapters[chapter.index] ?: 0) + 1
-                downloadFinish(chapter, "获取正文失败\n${it.localizedMessage}", resetPageOffset)
+                val fallback = BookHelp.getContent(book, chapter)
+                    ?: "获取正文失败\n${it.localizedMessage}"
+                downloadFinish(chapter, fallback, resetPageOffset)
             }.onCancel {
                 onCancel(chapter.index)
                 downloadFinish(chapter, "download canceled", resetPageOffset, true)

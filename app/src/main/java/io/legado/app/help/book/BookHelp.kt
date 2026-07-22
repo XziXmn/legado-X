@@ -16,6 +16,7 @@ import io.legado.app.model.analyzeRule.AnalyzeUrl
 import io.legado.app.model.localBook.LocalBook
 import io.legado.app.utils.ArchiveUtils
 import io.legado.app.utils.FileUtils
+import io.legado.app.utils.GSON
 import io.legado.app.utils.ImageUtils
 import io.legado.app.utils.MD5Utils
 import io.legado.app.utils.NetworkUtils
@@ -45,6 +46,7 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 import java.util.zip.ZipFile
@@ -58,6 +60,7 @@ object BookHelp {
     private const val cacheFolderName = "book_cache"
     private const val cacheImageFolderName = "images"
     private const val cacheEpubFolderName = "epub"
+    private const val contentRuleFingerprintSuffix = "rule"
     private val downloadImages = ConcurrentHashMap<String, Mutex>()
 
     val cachePath = FileUtils.getPath(downloadDir, cacheFolderName)
@@ -165,6 +168,7 @@ object BookHelp {
     ) {
         try {
             saveText(book, bookChapter, content)
+            saveContentRuleFingerprint(bookSource, book, bookChapter)
             //saveImages(bookSource, book, bookChapter, content)
             postEvent(EventBus.SAVE_CONTENT, Pair(book, bookChapter))
         } catch (e: Exception) {
@@ -353,6 +357,39 @@ object BookHelp {
     }
 
     /**
+     * A network cache is usable only when its正文 rule still matches. Offline
+     * reading may use stale text and retry after connectivity is restored.
+     */
+    fun hasUsableContent(
+        book: Book,
+        bookChapter: BookChapter,
+        bookSource: BookSource?,
+    ): Boolean {
+        if (!hasContent(book, bookChapter)) return false
+        if (book.isLocal || bookSource == null || bookChapter.isVolume) return true
+        return !isContentRuleStale(book, bookChapter, bookSource) || !NetworkUtils.isAvailable()
+    }
+
+    fun isContentRuleStale(
+        book: Book,
+        bookChapter: BookChapter,
+        bookSource: BookSource?,
+    ): Boolean {
+        if (book.isLocal || bookSource == null || bookChapter.isVolume) return false
+        if (!hasContent(book, bookChapter)) return false
+        val sidecar = getContentRuleFingerprintFile(book, bookChapter)
+        return runCatching {
+            !sidecar.exists() || sidecar.readText() != contentRuleFingerprint(bookSource)
+        }.getOrDefault(true)
+    }
+
+    fun contentRuleFingerprint(bookSource: BookSource): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(GSON.toJson(bookSource.getContentRule()).toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
+    /**
      * 检测图片是否下载
      */
     fun hasImageContent(book: Book, bookChapter: BookChapter): Boolean {
@@ -430,6 +467,35 @@ object BookHelp {
             book.getFolderName(),
             bookChapter.getFileName()
         ).delete()
+        getContentRuleFingerprintFile(book, bookChapter).delete()
+        File(getContentRuleFingerprintFile(book, bookChapter).path + ".tmp").delete()
+    }
+
+    private fun saveContentRuleFingerprint(
+        bookSource: BookSource,
+        book: Book,
+        bookChapter: BookChapter,
+    ) {
+        if (book.isLocal || bookChapter.isVolume) return
+        val target = getContentRuleFingerprintFile(book, bookChapter)
+        target.parentFile?.mkdirs()
+        val temporary = File(target.path + ".tmp")
+        temporary.writeText(contentRuleFingerprint(bookSource))
+        if (!temporary.renameTo(target)) {
+            target.writeText(temporary.readText())
+            temporary.delete()
+        }
+    }
+
+    private fun getContentRuleFingerprintFile(
+        book: Book,
+        bookChapter: BookChapter,
+    ): File {
+        return downloadDir.getFile(
+            cacheFolderName,
+            book.getFolderName(),
+            bookChapter.getFileName(contentRuleFingerprintSuffix),
+        )
     }
 
     /**

@@ -77,6 +77,10 @@ import io.legado.app.help.webView.WebViewPool.DATA_HTML
 import io.legado.app.lib.dialogs.SelectItem
 import io.legado.app.lib.dialogs.selector
 import io.legado.app.model.Download
+import io.legado.app.model.chapterComment.HttpOrigin
+import io.legado.app.model.chapterComment.SourceScopedNetworkContext
+import io.legado.app.model.chapterComment.SourceScopedRequestPolicy
+import io.legado.app.model.chapterComment.newSourceScopedHttpClient
 import io.legado.app.ui.file.HandleFileContract
 import io.legado.app.utils.ACache
 import io.legado.app.utils.GSON
@@ -89,6 +93,11 @@ import kotlinx.coroutines.runBlocking
 import java.io.ByteArrayInputStream
 import java.lang.ref.WeakReference
 import java.net.URLDecoder
+import java.nio.charset.Charset
+import okhttp3.Request
+import okhttp3.OkHttpClient
+import io.legado.app.help.http.CookieManager as SourceCookieManager
+import io.legado.app.help.http.CookieStore
 import java.util.Date
 import androidx.core.graphics.createBitmap
 
@@ -100,7 +109,9 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
         url: String,
         html: String? = null,
         preloadJs: String? = null,
-        config: String? = null
+        config: String? = null,
+        securityMode: SecurityMode = SecurityMode.LEGACY,
+        sourceScopedNetworkContext: SourceScopedNetworkContext? = null,
     ) : this() {
         arguments = Bundle().apply {
             putString("sourceKey", sourceKey)
@@ -109,6 +120,13 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
             putString("html", html)
             putString("preloadJs", preloadJs)
             putString("config", config)
+            putString("securityMode", securityMode.name)
+            sourceScopedNetworkContext?.let { context ->
+                putString("sourceScopedScheme", context.origin.scheme)
+                putString("sourceScopedHost", context.origin.host)
+                putInt("sourceScopedPort", context.origin.port)
+                putStringArrayList("sourceScopedAddresses", ArrayList(context.pinnedAddresses))
+            }
         }
     }
 
@@ -136,6 +154,11 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
     private var customWebViewCallback: WebChromeClient.CustomViewCallback? = null
     private var originOrientation: Int? = null
     private var needClearHistory = true
+    private var securityMode = SecurityMode.LEGACY
+    private var authenticatedOrigin: HttpOrigin? = null
+    private var sourceScopedNetworkContext: SourceScopedNetworkContext? = null
+    private var sourceScopedHttpClient: OkHttpClient? = null
+    private var sourceScopedHeaders: Map<String, String> = emptyMap()
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -409,8 +432,22 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
             }
             val sourceKey = args.getString("sourceKey") ?: return@launch
             val url = args.getString("url") ?: return@launch
+            securityMode = runCatching {
+                SecurityMode.valueOf(args.getString("securityMode") ?: SecurityMode.LEGACY.name)
+            }.getOrDefault(SecurityMode.LEGACY)
+            source = appDb.bookSourceDao.getBookSource(sourceKey)
+            if (source == null) {
+                activity?.toastOnUi("no find bookSource")
+                dismiss()
+                return@launch
+            }
+            val bookType = args.getInt("bookType", 0)
             kotlin.runCatching {
-                args.getString("config")?.let { json ->
+                if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                    activity?.runOnUiThread {
+                        setConfig(SOURCE_SCOPED_CONFIG, true)
+                    }
+                } else args.getString("config")?.let { json ->
                     try {
                         GSON.fromJsonObject<Config>(json).getOrThrow().let { config ->
                             activity?.runOnUiThread {
@@ -439,12 +476,20 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
                 }
                 val analyzeUrl =
                     AnalyzeUrl(url, source = source, coroutineContext = coroutineContext)
+                if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                    val actionOrigin = SourceScopedRequestPolicy.validateActionUrl(analyzeUrl.url)
+                    val restoredContext = restoreSourceScopedNetworkContext(args, actionOrigin)
+                    authenticatedOrigin = restoredContext.origin
+                    sourceScopedNetworkContext = restoredContext
+                    sourceScopedHttpClient = newSourceScopedHttpClient(restoredContext)
+                    sourceScopedHeaders = LinkedHashMap(analyzeUrl.headerMap)
+                }
                 val html = args.getString("html") ?: analyzeUrl.getStrResponseAwait().body
                 if (html.isNullOrEmpty()) {
                     throw NoStackTraceException("html is NullOrEmpty")
                 }
                 preloadJs = args.getString("preloadJs")
-                val spliceHtml = if (preloadJs.isNullOrEmpty()) {
+                var spliceHtml = if (preloadJs.isNullOrEmpty()) {
                     html
                 } else {
                     val headIndex = html.indexOf("<head", ignoreCase = true)
@@ -460,15 +505,9 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
                         JS_URL + html
                     }
                 }
-                appDb.bookSourceDao.getBookSource(sourceKey).let {
-                    if (it == null) {
-                        activity?.toastOnUi("no find bookSource")
-                        dismiss()
-                        return@launch
-                    }
-                    source = it
+                if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                    spliceHtml = injectSourceScopedCsp(spliceHtml)
                 }
-                val bookType = args.getInt("bookType", 0)
                 currentWebView.post {
                     currentWebView.onResume() //缓存库拿的需要激活
                     initWebView(analyzeUrl.url, spliceHtml, analyzeUrl.headerMap, bookType)
@@ -478,13 +517,22 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
                 currentWebView.post {
                     currentWebView.resumeTimers()
                     currentWebView.onResume()
-                    currentWebView.loadDataWithBaseURL(
-                        url,
-                        it.stackTraceToString(),
-                        "text/html",
-                        "utf-8",
-                        url
-                    )
+                    if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                        initWebView(
+                            url,
+                            "<html><body>评论页面加载失败</body></html>",
+                            hashMapOf(),
+                            bookType,
+                        )
+                    } else {
+                        currentWebView.loadDataWithBaseURL(
+                            url,
+                            it.stackTraceToString(),
+                            "text/html",
+                            "utf-8",
+                            url
+                        )
+                    }
                     currentWebView.clearHistory()
                 }
             }
@@ -542,20 +590,74 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
         headerMap: HashMap<String, String>,
         bookType: Int
     ) {
-        currentWebView.webChromeClient = CustomWebChromeClient()
-        currentWebView.addJavascriptInterface(JSInterface(this), nameBasic)
+        currentWebView.webChromeClient = if (securityMode == SecurityMode.SOURCE_SCOPED) {
+            WebChromeClient()
+        } else {
+            CustomWebChromeClient()
+        }
+        if (securityMode == SecurityMode.SOURCE_SCOPED) {
+            currentWebView.removeJavascriptInterface(nameBasic)
+            currentWebView.removeJavascriptInterface(nameJava)
+            currentWebView.removeJavascriptInterface(nameSource)
+            currentWebView.removeJavascriptInterface(nameCache)
+        } else {
+            currentWebView.addJavascriptInterface(JSInterface(this), nameBasic)
+        }
         currentWebView.webViewClient = CustomWebViewClient()
         currentWebView.settings.userAgentString = headerMap.get(AppConst.UA_NAME, true)
-        source?.let { source ->
-            (activity as? AppCompatActivity)?.let { currentActivity ->
-                val webJsExtensions =
-                    WebJsExtensions(source, currentActivity, currentWebView, bookType, callback = this)
-                currentWebView.addJavascriptInterface(webJsExtensions, nameJava)
+        if (securityMode == SecurityMode.SOURCE_SCOPED) {
+            currentWebView.settings.allowFileAccess = false
+            currentWebView.settings.allowContentAccess = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                currentWebView.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             }
-            currentWebView.addJavascriptInterface(source, nameSource)
-            currentWebView.addJavascriptInterface(WebCacheManager, nameCache)
+        } else {
+            currentWebView.settings.allowFileAccess = true
+            currentWebView.settings.allowContentAccess = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                currentWebView.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            }
+            source?.let { source ->
+                (activity as? AppCompatActivity)?.let { currentActivity ->
+                    val webJsExtensions =
+                        WebJsExtensions(source, currentActivity, currentWebView, bookType, callback = this)
+                    currentWebView.addJavascriptInterface(webJsExtensions, nameJava)
+                }
+                currentWebView.addJavascriptInterface(source, nameSource)
+                currentWebView.addJavascriptInterface(WebCacheManager, nameCache)
+            }
         }
         currentWebView.loadDataWithBaseURL(url, html, "text/html", "utf-8", url)
+    }
+
+    private fun injectSourceScopedCsp(html: String): String {
+        val policy = "<meta http-equiv=\"Content-Security-Policy\" " +
+                "content=\"default-src 'none'; script-src 'self' 'unsafe-inline'; " +
+                "style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; " +
+                "font-src 'self' https: data:; media-src 'self' https:; connect-src 'self'; " +
+                "frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'\">"
+        val head = Regex("<head[^>]*>", RegexOption.IGNORE_CASE).find(html)
+        return if (head == null) {
+            policy + html
+        } else {
+            html.substring(0, head.range.last + 1) + policy + html.substring(head.range.last + 1)
+        }
+    }
+
+    private fun restoreSourceScopedNetworkContext(
+        args: Bundle,
+        actionOrigin: HttpOrigin,
+    ): SourceScopedNetworkContext {
+        val scheme = args.getString("sourceScopedScheme")
+        val host = args.getString("sourceScopedHost")
+        val port = args.getInt("sourceScopedPort", -1)
+        val addresses = args.getStringArrayList("sourceScopedAddresses")?.toList().orEmpty()
+        require(scheme != null && host != null && port >= 0) {
+            "Missing source-scoped network context"
+        }
+        val suppliedOrigin = HttpOrigin(scheme, host, port)
+        require(suppliedOrigin == actionOrigin) { "Source-scoped origin changed" }
+        return SourceScopedRequestPolicy.restoreNetworkContext(suppliedOrigin, addresses)
     }
 
     private fun saveImage(webPic: String) {
@@ -780,10 +882,19 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
                 currentWebView.clearHistory() //清除历史
             }
             super.onPageStarted(view, url, favicon)
-            currentWebView.evaluateJavascript(basicJs, null)
+            if (securityMode != SecurityMode.SOURCE_SCOPED) {
+                currentWebView.evaluateJavascript(basicJs, null)
+            }
         }
 
         private fun shouldOverrideUrlLoading(url: Uri): Boolean {
+            if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                val origin = authenticatedOrigin ?: return true
+                return when (url.scheme?.lowercase()) {
+                    "http", "https" -> !SourceScopedRequestPolicy.canNavigate(url.toString(), origin)
+                    else -> true
+                }
+            }
             return when (url.scheme) {
                 "http", "https" -> false
                 "legado", "yuedu" -> {
@@ -806,7 +917,11 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
         override fun onReceivedSslError(
             view: WebView?, handler: SslErrorHandler?, error: SslError?
         ) {
-            handler?.proceed()
+            if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                handler?.cancel()
+            } else {
+                handler?.proceed()
+            }
         }
 
         private var jsInjected = false
@@ -814,6 +929,9 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
             view: WebView, request: WebResourceRequest
         ): WebResourceResponse? {
             val url = request.url.toString()
+            if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                return runBlocking(IO) { getSourceScopedResponse(request) }
+            }
             if (request.isForMainFrame) {
                 if (!preloadJs.isNullOrEmpty()) {
                     jsInjected = false
@@ -834,6 +952,111 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
                 )
             }
             return super.shouldInterceptRequest(view, request)
+        }
+
+        private fun getSourceScopedResponse(request: WebResourceRequest): WebResourceResponse {
+            val origin = authenticatedOrigin
+                ?: return blockedResponse(403, "Missing authenticated origin")
+            if (request.method != "GET" && request.method != "HEAD") {
+                return blockedResponse(405, "Unsupported request method")
+            }
+            return runCatching {
+                loadSourceScopedResponse(request, request.url.toString(), origin, redirectCount = 0)
+            }.getOrElse {
+                blockedResponse(502, "Source-scoped request failed")
+            }
+        }
+
+        private fun loadSourceScopedResponse(
+            webRequest: WebResourceRequest,
+            url: String,
+            origin: HttpOrigin,
+            redirectCount: Int,
+        ): WebResourceResponse {
+            val allowed = if (webRequest.isForMainFrame) {
+                SourceScopedRequestPolicy.canNavigate(url, origin)
+            } else {
+                SourceScopedRequestPolicy.canLoadSubresource(url, origin)
+            }
+            if (!allowed) return blockedResponse(403, "Blocked source-scoped request")
+            val client = sourceScopedHttpClient
+                ?: return blockedResponse(403, "Missing source-scoped client")
+            client.newCall(buildSourceScopedRequest(webRequest, url, origin)).execute().use { response ->
+                if (response.code in 300..399) {
+                    if (redirectCount >= MAX_SCOPED_REDIRECTS) {
+                        return blockedResponse(508, "Too many source-scoped redirects")
+                    }
+                    val location = response.header("Location")
+                        ?: return blockedResponse(502, "Source-scoped redirect has no Location")
+                    val nextUrl = java.net.URI(url).resolve(location).toString()
+                    return loadSourceScopedResponse(webRequest, nextUrl, origin, redirectCount + 1)
+                }
+                return response.toWebResourceResponse(webRequest.method == "HEAD")
+            }
+        }
+
+        private fun buildSourceScopedRequest(
+            webRequest: WebResourceRequest,
+            url: String,
+            origin: HttpOrigin,
+        ): Request {
+            val requestBuilder = Request.Builder().url(url)
+            SAFE_WEB_HEADERS.forEach { safeName ->
+                webRequest.requestHeaders.entries.firstOrNull { it.key.equals(safeName, true) }
+                    ?.value?.let { requestBuilder.header(safeName, it) }
+            }
+            if (SourceScopedRequestPolicy.isSameOrigin(url, origin)) {
+                sourceScopedHeaders.forEach { (name, value) ->
+                    if (name.lowercase() !in BLOCKED_SOURCE_HEADERS) {
+                        requestBuilder.header(name, value)
+                    }
+                }
+                SourceCookieManager.mergeCookies(
+                    CookieStore.getCookie(url),
+                    sourceScopedHeaders.entries.firstOrNull { it.key.equals("Cookie", true) }?.value,
+                )?.takeIf(String::isNotBlank)?.let { requestBuilder.header("Cookie", it) }
+            } else {
+                requestBuilder.removeHeader("Authorization")
+                requestBuilder.removeHeader("Cookie")
+            }
+            return if (webRequest.method == "HEAD") requestBuilder.head().build() else requestBuilder.get().build()
+        }
+
+        private fun okhttp3.Response.toWebResourceResponse(headOnly: Boolean): WebResourceResponse {
+            val contentType = body.contentType()
+            val mimeType = contentType?.toString()?.substringBefore(';') ?: "application/octet-stream"
+            val charset = contentType?.charset()?.name() ?: "utf-8"
+            var bytes = if (headOnly) ByteArray(0) else body.bytes()
+            require(bytes.size <= MAX_SCOPED_RESOURCE_BYTES) { "Source-scoped resource is too large" }
+            if (!headOnly && mimeType.equals("text/html", true)) {
+                val bodyCharset = Charset.forName(charset)
+                bytes = injectSourceScopedCsp(bytes.toString(bodyCharset)).toByteArray(bodyCharset)
+            }
+            val responseHeaders = linkedMapOf<String, String>()
+            headers.names().forEach { name ->
+                if (!name.equals("Set-Cookie", true) && !name.equals("Content-Length", true)) {
+                    responseHeaders[name] = headers.values(name).joinToString(", ")
+                }
+            }
+            return WebResourceResponse(
+                mimeType,
+                charset,
+                code,
+                message.ifBlank { "HTTP" },
+                responseHeaders,
+                ByteArrayInputStream(bytes),
+            )
+        }
+
+        private fun blockedResponse(status: Int, reason: String): WebResourceResponse {
+            return WebResourceResponse(
+                "text/plain",
+                "utf-8",
+                status,
+                reason,
+                emptyMap(),
+                ByteArrayInputStream(ByteArray(0)),
+            )
         }
         private val webCookieManager by lazy { android.webkit.CookieManager.getInstance() }
         private suspend fun getModifiedContentWithJs(url: String, request: WebResourceRequest): WebResourceResponse? {
@@ -880,6 +1103,39 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
                 return null
             }
         }
+    }
+
+    enum class SecurityMode {
+        LEGACY,
+        SOURCE_SCOPED,
+    }
+
+    companion object {
+        private const val MAX_SCOPED_RESOURCE_BYTES = 8 * 1024 * 1024
+        private const val MAX_SCOPED_REDIRECTS = 5
+        private val SOURCE_SCOPED_CONFIG = Config(
+            state = BottomSheetBehavior.STATE_EXPANDED,
+            isHideable = true,
+            skipCollapsed = true,
+            heightPercentage = 0.78f,
+            longClickSaveImg = false,
+            scrollNoDraggable = true,
+        )
+        private val SAFE_WEB_HEADERS = setOf(
+            "Accept",
+            "Accept-Language",
+            "If-Modified-Since",
+            "If-None-Match",
+            "Range",
+            "User-Agent",
+        )
+        private val BLOCKED_SOURCE_HEADERS = setOf(
+            "connection",
+            "content-length",
+            "cookiejar",
+            "host",
+            "transfer-encoding",
+        )
     }
 
 }

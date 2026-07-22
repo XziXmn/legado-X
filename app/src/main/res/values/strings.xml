@@ -2,6 +2,8 @@
 <resources>
     <!--App-->
     <string name="app_name">Legado</string>
+    <string name="app_name_legadohub">小说聚合阅读</string>
+    <string name="page_hot_comments">本页热评</string>
     <string name="app_name_a">Legado·A</string>
     <string name="app_name_s" translatable="false">LegadoPlus</string>
     <string name="receiving_shared_label">Legado·search</string>

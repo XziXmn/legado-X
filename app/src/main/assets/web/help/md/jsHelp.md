@@ -38,6 +38,11 @@
 ## 当前类对象的可使用的部分方法
 函数带有默认值的函数会自动重载，可以不填。  
 
+* 检查当前阅读器是否支持版本化通用能力。未知能力返回 `false`。
+```js
+java.hasReaderCapability(name: String, minVersion: Int): Boolean
+```
+
 ### [RssJsExtensions](https://github.com/Luoyacheng/legado-E/blob/main/app/src/main/java/io/legado/app/ui/rss/read/RssJsExtensions.kt)独有函数
 > 在订阅源`shouldOverrideUrlLoading`规则中使用  
 > 被下方`SourceLoginJsExtensions`类包含，也能使用这些函数  
