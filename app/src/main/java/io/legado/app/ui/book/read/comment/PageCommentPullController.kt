@@ -39,6 +39,10 @@ class PageCommentPullController(
     val isClaimed: Boolean
         get() = state == State.PULLING || state == State.ARMED || state == State.SETTLING
 
+    /** True while waiting to decide between page-comment pull and page-turn. */
+    val isTracking: Boolean
+        get() = state == State.TRACKING
+
     fun start(x: Float, y: Float, enabled: Boolean) {
         reset()
         if (!enabled) return

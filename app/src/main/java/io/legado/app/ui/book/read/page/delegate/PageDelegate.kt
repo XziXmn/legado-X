@@ -109,6 +109,15 @@ abstract class PageDelegate(protected val readView: ReadView) {
 
     abstract fun abortAnim()
 
+    /**
+     * Abort any in-progress turn and clear touch bookkeeping.
+     * Used when another gesture (e.g. page-comment pull) steals the stream.
+     */
+    open fun resetTouchState() {
+        abortAnim()
+        onDown()
+    }
+
     abstract fun onAnimStart(animationSpeed: Int) //scroller start
 
     abstract fun onDraw(canvas: Canvas) //绘制

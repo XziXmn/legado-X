@@ -78,6 +78,8 @@ class ReadView(context: Context, attrs: AttributeSet) :
         PageCommentPullController(PAGE_COMMENT_THRESHOLD_DP.dpToPx().toFloat())
     }
     private var pendingPageCommentEvent: ChapterCommentEvent? = null
+    /** When true, page-turn delegate waits until comment pull is ruled out. */
+    private var deferPageDelegateForComment = false
 
     //起始点
     var startX: Float = 0f
@@ -224,15 +226,21 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 pressDown = true
                 isMove = false
                 touchOwner = TouchOwner.PAGE
-                pageDelegate?.onTouch(event)
-                pageDelegate?.onDown()
                 setStartPoint(event.x, event.y, false)
                 pendingPageCommentEvent = pageCommentEventAt(event.x)
-                pageCommentPullController.start(
-                    event.x,
-                    event.y,
-                    pendingPageCommentEvent != null && canStartPageCommentGesture(),
-                )
+                val commentPullEnabled =
+                    pendingPageCommentEvent != null && canStartPageCommentGesture()
+                deferPageDelegateForComment = commentPullEnabled
+                pageCommentPullController.start(event.x, event.y, commentPullEnabled)
+                // While a page-comment pull is possible, do not feed the page-turn delegate
+                // until pull is ruled out. First-pull flicker came from the turn machine
+                // arming (and screenshotting) during the tracking window.
+                if (commentPullEnabled) {
+                    pageDelegate?.resetTouchState()
+                } else {
+                    pageDelegate?.onTouch(event)
+                    pageDelegate?.onDown()
+                }
             }
 
             MotionEvent.ACTION_MOVE -> {
@@ -245,7 +253,9 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 )
                 if (pullResult.claimed) {
                     if (pullResult.claimedNow) {
+                        deferPageDelegateForComment = false
                         cancelPageDelegate()
+                        curPage.prepareCommentPullChrome()
                         touchOwner = TouchOwner.COMMENT
                         isMove = true
                         longPressed = false
@@ -255,6 +265,10 @@ class ReadView(context: Context, attrs: AttributeSet) :
                     if (pullResult.feedback) {
                         performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     }
+                    return true
+                }
+                // Still deciding pull vs page-turn: do not arm page-turn yet.
+                if (pageCommentPullController.isTracking) {
                     return true
                 }
                 val absX = abs(startX - event.x)
@@ -268,6 +282,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
                     if (isTextSelected) {
                         selectText(event.x, event.y)
                     } else {
+                        handOffToPageDelegateIfNeeded(event)
                         pageDelegate?.onTouch(event)
                     }
                 }
@@ -284,6 +299,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 pressDown = false
                 pageCommentPullController.reset()
                 pendingPageCommentEvent = null
+                deferPageDelegateForComment = false
                 touchOwner = TouchOwner.NONE
                 if (!pageDelegate!!.isMoved && !isMove) {
                     if (!longPressed && !pressOnTextSelected) {
@@ -312,6 +328,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 pressDown = false
                 pageCommentPullController.reset()
                 pendingPageCommentEvent = null
+                deferPageDelegateForComment = false
                 touchOwner = TouchOwner.NONE
                 if (isTextSelected) {
                     callBack.showTextActionMenu()
@@ -343,8 +360,27 @@ class ReadView(context: Context, attrs: AttributeSet) :
      * during the page-comment pull gesture.
      */
     private fun cancelPageDelegate() {
-        pageDelegate?.abortAnim()
-        pageDelegate?.onDown()
+        pageDelegate?.resetTouchState()
+    }
+
+    /** After comment-pull tracking rejects a gesture, resume page-turn from this stream. */
+    private fun handOffToPageDelegateIfNeeded(event: MotionEvent) {
+        if (!deferPageDelegateForComment) return
+        deferPageDelegateForComment = false
+        pageDelegate?.resetTouchState()
+        val down = MotionEvent.obtain(
+            event.downTime,
+            event.eventTime,
+            MotionEvent.ACTION_DOWN,
+            startX,
+            startY,
+            event.metaState,
+        )
+        try {
+            pageDelegate?.onTouch(down)
+        } finally {
+            down.recycle()
+        }
     }
 
     private fun finishCommentGesture(cancelled: Boolean) {
@@ -353,6 +389,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
         pressDown = false
         pressOnTextSelected = false
         pendingPageCommentEvent = null
+        deferPageDelegateForComment = false
         touchOwner = TouchOwner.NONE
         removeCallbacks(longPressRunnable)
         settleCommentTranslation {
@@ -376,6 +413,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
         curPage.cancelCommentPullAnimation()
         pageCommentPullController.reset()
         pendingPageCommentEvent = null
+        deferPageDelegateForComment = false
     }
 
     private fun pageCommentEventAt(x: Float): ChapterCommentEvent? {

@@ -136,6 +136,14 @@ abstract class HorizontalPageDelegate(readView: ReadView) : PageDelegate(readVie
         }
     }
 
+    override fun resetTouchState() {
+        super.resetTouchState()
+        // Drop any page-turn screenshots so dispatchDraw cannot paint a stale tip bar
+        // over the live page on the first comment pull of a session.
+        upRecorder()
+        readView.invalidate()
+    }
+
     override fun nextPageByAnim(animationSpeed: Int) {
         abortAnim()
         if (!hasNext()) return

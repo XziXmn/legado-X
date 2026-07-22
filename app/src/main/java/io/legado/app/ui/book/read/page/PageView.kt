@@ -475,9 +475,20 @@ class PageView(context: Context) : FrameLayout(context) {
 
     /**
      * Rubber-band the body only while the page-comment pull is active.
-     * Header / footer / status bar stay fixed so tip rows do not slide away
-     * and reappear as a second bar.
+     * Header / footer / status bar stay fixed and drawn above the body so tip
+     * rows never slide off or get covered by translated content.
      */
+    fun prepareCommentPullChrome() {
+        translationY = 0f
+        binding.vwRoot.clipChildren = true
+        // Later siblings draw on top; elevation keeps chrome above the body.
+        val chromeElevation = 8f * resources.displayMetrics.density
+        binding.vwStatusBar.elevation = chromeElevation
+        binding.llHeader.elevation = chromeElevation
+        binding.vwTopDivider.elevation = chromeElevation
+        binding.contentTextView.elevation = 0f
+    }
+
     fun setCommentPullOffset(offset: Float) {
         translationY = 0f
         binding.contentTextView.translationY = offset.coerceAtLeast(0f)
@@ -488,13 +499,24 @@ class PageView(context: Context) : FrameLayout(context) {
         binding.contentTextView.animate()
             .translationY(0f)
             .setDuration(durationMs)
-            .withEndAction { onEnd?.invoke() }
+            .withEndAction {
+                clearCommentPullChrome()
+                onEnd?.invoke()
+            }
             .start()
     }
 
     fun cancelCommentPullAnimation() {
         binding.contentTextView.animate().cancel()
         setCommentPullOffset(0f)
+        clearCommentPullChrome()
+    }
+
+    private fun clearCommentPullChrome() {
+        binding.vwStatusBar.elevation = 0f
+        binding.llHeader.elevation = 0f
+        binding.vwTopDivider.elevation = 0f
+        binding.contentTextView.elevation = 0f
     }
 
     fun selectStartMove(x: Float, y: Float) {
