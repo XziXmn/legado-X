@@ -11,7 +11,7 @@ import kotlinx.parcelize.Parcelize
  */
 @Parcelize
 data class ChapterCommentRule(
-    var protocolVersion: Int = 2,
+    var protocolVersion: Int = 1,
     var url: String? = null,
     var data: String? = null,
     var action: String? = null,

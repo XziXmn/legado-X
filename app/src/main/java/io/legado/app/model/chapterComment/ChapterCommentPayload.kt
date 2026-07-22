@@ -63,7 +63,9 @@ object ChapterCommentParser {
         require(root?.isJsonObject == true) { "Chapter comment payload must be an object" }
         val data = root.asJsonObject
         val version = data.requiredInt("version", min = 1)
-        require(version == PROTOCOL_VERSION) { "Unsupported chapter comment version: $version" }
+        require(version in 1..PROTOCOL_VERSION) {
+            "Unsupported chapter comment version: $version"
+        }
 
         val segmentArray = data.get("segments")?.let {
             require(it.isJsonArray) { "segments must be an array" }
@@ -113,6 +115,16 @@ object ChapterCommentParser {
         if (value == null || value.isJsonNull) return null
         require(value.isJsonObject) { "$field must be an object" }
         val data = value.asJsonObject
+        val previews = when {
+            data.has("previews") && !data.get("previews").isJsonNull ->
+                parsePreviews(data.get("previews"), field)
+            // v1 used a single string field "preview"
+            else -> data.optionalString("preview", MAX_PREVIEW_LENGTH)
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?.let { listOf(it) }
+                ?: emptyList()
+        }
         return ChapterCommentSummary(
             label = data.optionalString("label", MAX_ID_LENGTH)?.trim()?.takeIf(String::isNotEmpty)
                 ?: defaultLabel,
@@ -121,7 +133,7 @@ object ChapterCommentParser {
             badge = data.optionalString("badge", MAX_ID_LENGTH)
                 ?.trim()
                 ?.takeIf(String::isNotEmpty),
-            previews = parsePreviews(data.get("previews"), field),
+            previews = previews,
         )
     }
 
