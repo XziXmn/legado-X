@@ -364,21 +364,16 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     private fun setCommentTranslation(offset: Float) {
-        // Only the visible page should move; prev/next stay off-screen/invisible.
-        curPage.translationY = offset
+        // Move body text only; keep tip header (章名 / 热评) pinned.
+        curPage.setCommentPullOffset(offset)
     }
 
     private fun settleCommentTranslation(onEnd: () -> Unit) {
-        curPage.animate()
-            .translationY(0f)
-            .setDuration(PAGE_COMMENT_SETTLE_MS)
-            .withEndAction(onEnd)
-            .start()
+        curPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS, onEnd)
     }
 
     private fun cancelCommentAnimations() {
-        curPage.animate().cancel()
-        setCommentTranslation(0f)
+        curPage.cancelCommentPullAnimation()
         pageCommentPullController.reset()
         pendingPageCommentEvent = null
     }

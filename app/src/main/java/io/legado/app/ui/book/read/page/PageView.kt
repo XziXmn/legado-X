@@ -473,6 +473,30 @@ class PageView(context: Context) : FrameLayout(context) {
         binding.contentTextView.isMainView = true
     }
 
+    /**
+     * Rubber-band the body only while the page-comment pull is active.
+     * Header / footer / status bar stay fixed so tip rows do not slide away
+     * and reappear as a second bar.
+     */
+    fun setCommentPullOffset(offset: Float) {
+        translationY = 0f
+        binding.contentTextView.translationY = offset.coerceAtLeast(0f)
+    }
+
+    fun animateCommentPullReset(durationMs: Long, onEnd: (() -> Unit)? = null) {
+        translationY = 0f
+        binding.contentTextView.animate()
+            .translationY(0f)
+            .setDuration(durationMs)
+            .withEndAction { onEnd?.invoke() }
+            .start()
+    }
+
+    fun cancelCommentPullAnimation() {
+        binding.contentTextView.animate().cancel()
+        setCommentPullOffset(0f)
+    }
+
     fun selectStartMove(x: Float, y: Float) {
         binding.contentTextView.selectStartMove(x - imgBgPaddingStart, y - headerHeight)
     }
