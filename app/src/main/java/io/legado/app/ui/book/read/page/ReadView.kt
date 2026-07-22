@@ -245,7 +245,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 )
                 if (pullResult.claimed) {
                     if (pullResult.claimedNow) {
-                        cancelPageDelegate(event)
+                        cancelPageDelegate()
                         touchOwner = TouchOwner.COMMENT
                         isMove = true
                         longPressed = false
@@ -336,12 +336,15 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 !BaseReadAloudService.isPlay()
     }
 
-    private fun cancelPageDelegate(event: MotionEvent) {
-        MotionEvent.obtain(event).also { cancelEvent ->
-            cancelEvent.action = MotionEvent.ACTION_CANCEL
-            pageDelegate?.onTouch(cancelEvent)
-            cancelEvent.recycle()
-        }
+    /**
+     * Stop page-turn machinery without sending ACTION_CANCEL.
+     * Horizontal delegates treat CANCEL like UP and call [PageDelegate.onAnimStart],
+     * which would draw page screenshots on top of the live page and flash duplicate headers
+     * during the page-comment pull gesture.
+     */
+    private fun cancelPageDelegate() {
+        pageDelegate?.abortAnim()
+        pageDelegate?.onDown()
     }
 
     private fun finishCommentGesture(cancelled: Boolean) {
@@ -361,14 +364,11 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     private fun setCommentTranslation(offset: Float) {
-        prevPage.translationY = offset
+        // Only the visible page should move; prev/next stay off-screen/invisible.
         curPage.translationY = offset
-        nextPage.translationY = offset
     }
 
     private fun settleCommentTranslation(onEnd: () -> Unit) {
-        prevPage.animate().translationY(0f).setDuration(PAGE_COMMENT_SETTLE_MS).start()
-        nextPage.animate().translationY(0f).setDuration(PAGE_COMMENT_SETTLE_MS).start()
         curPage.animate()
             .translationY(0f)
             .setDuration(PAGE_COMMENT_SETTLE_MS)
@@ -377,9 +377,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     private fun cancelCommentAnimations() {
-        prevPage.animate().cancel()
         curPage.animate().cancel()
-        nextPage.animate().cancel()
         setCommentTranslation(0f)
         pageCommentPullController.reset()
         pendingPageCommentEvent = null

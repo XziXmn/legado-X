@@ -57,8 +57,16 @@ class ScrollPageDelegate(readView: ReadView) : PageDelegate(readView) {
                 onScroll(event)
             }
 
-            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
-                onAnimStart(readView.defaultAnimationSpeed)
+            MotionEvent.ACTION_UP -> {
+                if (isMoved && !noNext) {
+                    onAnimStart(readView.defaultAnimationSpeed)
+                } else {
+                    abortAnim()
+                }
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                abortAnim()
             }
         }
     }

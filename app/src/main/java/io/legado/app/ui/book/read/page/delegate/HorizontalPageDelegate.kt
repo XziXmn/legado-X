@@ -53,8 +53,19 @@ abstract class HorizontalPageDelegate(readView: ReadView) : PageDelegate(readVie
                 onScroll(event)
             }
 
-            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
-                onAnimStart(readView.defaultAnimationSpeed)
+            MotionEvent.ACTION_UP -> {
+                // Complete the page-turn only after a real drag; bare taps stay put.
+                if (isMoved && !noNext) {
+                    onAnimStart(readView.defaultAnimationSpeed)
+                } else {
+                    abortAnim()
+                }
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                // Parent may steal the stream (e.g. page-comment pull). Abort instead of
+                // starting a flip animation that would paint screenshot pages over the live view.
+                abortAnim()
             }
         }
     }
