@@ -32,34 +32,8 @@ class ChapterCommentProtocolTest {
 
         assertEquals("body", decoded.content)
         assertEquals("https://example.test/summary", decoded.chapterComment?.url)
-        assertEquals(1, decoded.chapterComment?.protocolVersion)
+        assertEquals(2, decoded.chapterComment?.protocolVersion)
         assertTrue(decoded.chapterComment?.display?.page?.enabled == true)
-    }
-
-    @Test
-    fun parserAcceptsV1PayloadWithPreviewField() {
-        val payload = ChapterCommentParser.parse(
-            """
-            {
-              "version": 1,
-              "segments": [{
-                "id": "p-1",
-                "paragraphIndex": 0,
-                "counts": {"total": 12, "hot": 1},
-                "pageEligible": true
-              }],
-              "chapter": {
-                "label": "本章说",
-                "counts": {"total": 50},
-                "preview": "一条热评预览"
-              }
-            }
-            """.trimIndent()
-        )
-
-        assertEquals(1, payload.version)
-        assertEquals(12, payload.segments.single().counts.total)
-        assertEquals(listOf("一条热评预览"), payload.chapter?.previews)
     }
 
     @Test
@@ -111,8 +85,7 @@ class ChapterCommentProtocolTest {
 
     @Test
     fun parserRejectsMalformedOrOversizedFields() {
-        assertInvalid("""{"version":0,"segments":[]}""")
-        assertInvalid("""{"version":3,"segments":[]}""")
+        assertInvalid("""{"version":1,"segments":[]}""")
         assertInvalid("""{"version":2,"segments":[{"id":"x","paragraphIndex":-1}]}""")
         assertInvalid(
             """{"version":2,"segments":[{"id":"${"x".repeat(257)}","paragraphIndex":0}]}"""
@@ -139,10 +112,9 @@ class ChapterCommentProtocolTest {
     }
 
     @Test
-    fun analyzeRuleExposesSupportedCapabilityVersions() {
+    fun analyzeRuleExposesOnlyKnownCapabilityVersion() {
         val analyzeRule = AnalyzeRule()
 
-        // version argument is the minimum protocol the source needs
         assertEquals(true, analyzeRule.evalJS("java.hasReaderCapability('chapter-comments', 1)"))
         assertEquals(true, analyzeRule.evalJS("java.hasReaderCapability('chapter-comments', 2)"))
         assertEquals(false, analyzeRule.evalJS("java.hasReaderCapability('chapter-comments', 3)"))

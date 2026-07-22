@@ -91,15 +91,10 @@ interface JsExtensions : JsEncodeUtils {
     fun getSource(): BaseSource?
     fun getTag(): String?
 
-    /**
-     * Return whether this reader implements a versioned, source-neutral capability.
-     *
-     * [version] is the **minimum** protocol the source needs. The reader reports true when it
-     * still supports that version (currently chapter-comments 1..2).
-     */
+    /** Return whether this reader implements a versioned, source-neutral capability. */
     @JavascriptInterface
-    fun hasReaderCapability(name: String, version: Int): Boolean {
-        return name == "chapter-comments" && version in 1..2
+    fun hasReaderCapability(name: String, minVersion: Int): Boolean {
+        return name == "chapter-comments" && minVersion in 1..2
     }
 
     private val context: CoroutineContext

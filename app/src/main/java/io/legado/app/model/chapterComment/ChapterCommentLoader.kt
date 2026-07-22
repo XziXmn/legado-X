@@ -59,7 +59,7 @@ class ChapterCommentLoader(
         chapter: BookChapter,
         rule: ChapterCommentRule,
     ): String {
-        require(rule.protocolVersion in 1..ChapterCommentParser.PROTOCOL_VERSION) {
+        require(rule.protocolVersion == ChapterCommentParser.PROTOCOL_VERSION) {
             "Unsupported chapter comment protocol: ${rule.protocolVersion}"
         }
         val urlRule = rule.url?.takeIf(String::isNotBlank)
