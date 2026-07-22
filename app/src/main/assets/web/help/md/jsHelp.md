@@ -38,7 +38,10 @@
 ## 当前类对象的可使用的部分方法
 函数带有默认值的函数会自动重载，可以不填。  
 
-* 检查当前阅读器是否支持版本化通用能力。未知能力返回 `false`。
+* 检查当前阅读器是否支持版本化通用能力。未知能力返回 `false`，不抛异常。  
+  **注意：`version` 为精确版本匹配，不是 minVersion。** 当前仅当  
+  `name === "chapter-comments" && version === 2` 时返回 `true`；传入 `1` 或 `3` 均为 `false`。  
+  书源应探测 v2，例如：`java.hasReaderCapability("chapter-comments", 2)`。
 ```js
 java.hasReaderCapability(name: String, version: Int): Boolean
 ```

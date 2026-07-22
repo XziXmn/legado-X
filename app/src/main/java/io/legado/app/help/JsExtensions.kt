@@ -91,7 +91,12 @@ interface JsExtensions : JsEncodeUtils {
     fun getSource(): BaseSource?
     fun getTag(): String?
 
-    /** Return whether this reader implements a versioned, source-neutral capability. */
+    /**
+     * Return whether this reader implements a versioned, source-neutral capability.
+     *
+     * [version] is an **exact** protocol version (not a minimum). Unknown names return
+     * false. Currently only `("chapter-comments", 2)` is true.
+     */
     @JavascriptInterface
     fun hasReaderCapability(name: String, version: Int): Boolean {
         return name == "chapter-comments" && version == 2

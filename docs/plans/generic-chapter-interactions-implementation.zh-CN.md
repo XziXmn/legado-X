@@ -413,8 +413,9 @@ Idle -> Tracking -> Pulling -> Armed -> Settling -> Opening -> Idle
 
 本轮已固定：
 
-- 定制 APK 展示名为“小说聚合阅读”，使用独立 application ID；
-- 定制分支使用 `codex/legadohub-reader`，默认推送到 `XziXmn/legado-X`；原仓库只作为上游同步源；
+- 正式版：展示名「阅读」，包名 `io.legado.app.release`；测试版：展示名「阅读·测试」，包名 `io.legado.app.beta`；
+- 默认推送到 `XziXmn/legado-X` 的 `main`；`upstream`（Legado-E）仅同步、默认不推送；
 - 连续滚动模式 v2 使用阅读菜单中的“本页热评”；
 - 原生章末入口文案为“本章说”，评论弹窗高度固定为屏幕的 `0.78`；
-- 评论能力只面向支持 v2 契约的定制客户端；普通客户端不提供降级入口。
+- 评论能力只面向支持 v2 契约的定制客户端；普通客户端不提供降级入口；
+- `java.hasReaderCapability` 对协议版本做精确匹配，书源须探测 `chapter-comments` / `2`。
