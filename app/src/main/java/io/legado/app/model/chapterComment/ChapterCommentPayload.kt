@@ -24,24 +24,27 @@ data class ChapterCommentSummary(
     val label: String,
     val counts: ChapterCommentCounts,
     val actionData: JsonElement?,
-    val preview: String? = null,
+    val badge: String? = null,
+    val previews: List<String> = emptyList(),
 )
 
 data class ChapterCommentPayload(
     val version: Int,
     val segments: List<ChapterCommentSegment>,
     val chapter: ChapterCommentSummary?,
+    val author: ChapterCommentSummary? = null,
 )
 
 /** Strict parser for the source-neutral chapter comment protocol. */
 object ChapterCommentParser {
 
-    const val PROTOCOL_VERSION = 1
+    const val PROTOCOL_VERSION = 2
     const val MAX_PAYLOAD_BYTES = 256 * 1024
     const val MAX_SEGMENTS = 200
     const val MAX_ID_LENGTH = 256
     const val MAX_EXCERPT_LENGTH = 512
     const val MAX_PREVIEW_LENGTH = 512
+    const val MAX_PREVIEWS = 3
 
     /**
      * Parse and validate a normalized summary payload.
@@ -73,15 +76,14 @@ object ChapterCommentParser {
             require(item.isJsonObject) { "segments[$index] must be an object" }
             parseSegment(item.asJsonObject, index)
         }
-        val chapter = data.get("chapter")?.let {
-            if (it.isJsonNull) {
-                null
-            } else {
-                require(it.isJsonObject) { "chapter must be an object" }
-                parseChapter(it.asJsonObject)
-            }
-        }
-        return ChapterCommentPayload(version, segments, chapter)
+        val author = parseSummary(data.get("author"), "author", "作家说")
+        val chapter = parseSummary(data.get("chapter"), "chapter", "本章说")
+        return ChapterCommentPayload(
+            version = version,
+            segments = segments,
+            chapter = chapter,
+            author = author,
+        )
     }
 
     private fun parseSegment(data: JsonObject, index: Int): ChapterCommentSegment {
@@ -103,15 +105,41 @@ object ChapterCommentParser {
         )
     }
 
-    private fun parseChapter(data: JsonObject): ChapterCommentSummary {
+    private fun parseSummary(
+        value: JsonElement?,
+        field: String,
+        defaultLabel: String,
+    ): ChapterCommentSummary? {
+        if (value == null || value.isJsonNull) return null
+        require(value.isJsonObject) { "$field must be an object" }
+        val data = value.asJsonObject
         return ChapterCommentSummary(
-            label = data.optionalString("label", MAX_ID_LENGTH) ?: "本章说",
-            counts = parseCounts(data.get("counts"), "chapter.counts"),
+            label = data.optionalString("label", MAX_ID_LENGTH)?.trim()?.takeIf(String::isNotEmpty)
+                ?: defaultLabel,
+            counts = parseCounts(data.get("counts"), "$field.counts"),
             actionData = data.get("actionData")?.takeUnless(JsonElement::isJsonNull)?.deepCopy(),
-            preview = data.optionalString("preview", MAX_PREVIEW_LENGTH)
+            badge = data.optionalString("badge", MAX_ID_LENGTH)
                 ?.trim()
                 ?.takeIf(String::isNotEmpty),
+            previews = parsePreviews(data.get("previews"), field),
         )
+    }
+
+    private fun parsePreviews(value: JsonElement?, field: String): List<String> {
+        if (value == null || value.isJsonNull) return emptyList()
+        require(value.isJsonArray) { "$field.previews must be an array" }
+        val array = value.asJsonArray
+        require(array.size() <= MAX_PREVIEWS) { "$field.previews has too many items" }
+        return array.mapIndexedNotNull { index, item ->
+            require(item.isJsonPrimitive && item.asJsonPrimitive.isString) {
+                "$field.previews[$index] must be a string"
+            }
+            item.asString.also {
+                require(it.length <= MAX_PREVIEW_LENGTH) {
+                    "$field.previews[$index] exceeds $MAX_PREVIEW_LENGTH characters"
+                }
+            }.trim().takeIf(String::isNotEmpty)
+        }
     }
 
     private fun parseCounts(value: JsonElement?, field: String): ChapterCommentCounts {

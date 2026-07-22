@@ -28,7 +28,7 @@ class ChapterCommentRepositoryTest {
             base.copy(ruleFingerprint = "rule-b"),
             base.copy(bookUrl = "book-b"),
             base.copy(chapterUrl = "chapter-b"),
-            base.copy(protocolVersion = 2),
+            base.copy(protocolVersion = 3),
         ).map { it.cacheKey }
 
         assertEquals(keys.size, keys.toSet().size)
@@ -55,8 +55,8 @@ class ChapterCommentRepositoryTest {
             }
         }
 
-        assertEquals(1, first.await()?.payload?.version)
-        assertEquals(1, second.await()?.payload?.version)
+        assertEquals(2, first.await()?.payload?.version)
+        assertEquals(2, second.await()?.payload?.version)
         assertEquals(1, fetchCount.get())
     }
 
@@ -129,7 +129,7 @@ class ChapterCommentRepositoryTest {
         ruleFingerprint = "rule-a",
         bookUrl = "book-a",
         chapterUrl = "chapter-a",
-        protocolVersion = 1,
+        protocolVersion = 2,
         cacheTtlSeconds = cacheTtlSeconds,
     )
 
@@ -148,6 +148,6 @@ class ChapterCommentRepositoryTest {
     }
 
     companion object {
-        private const val VALID_PAYLOAD = """{"version":1,"segments":[]}"""
+        private const val VALID_PAYLOAD = """{"version":2,"segments":[]}"""
     }
 }

@@ -359,6 +359,7 @@ data class TextChapter(
         }
         removeChapterCommentBlocks()
         if (chapterCommentRule?.display?.chapter?.enabled == true) {
+            payload?.author?.let(::appendChapterCommentBlock)
             payload?.chapter?.let(::appendChapterCommentBlock)
         }
     }
@@ -371,9 +372,13 @@ data class TextChapter(
 
     private fun appendChapterCommentBlock(summary: io.legado.app.model.chapterComment.ChapterCommentSummary) {
         val lastTextPage = textPages.lastOrNull() ?: return
-        val lastLineBottom = lastTextPage.lines.maxOfOrNull { it.lineBottom }
-            ?: ChapterProvider.paddingTop.toFloat()
-        val top = lastLineBottom + TOP_GAP
+        val contentBottom = maxOf(
+            lastTextPage.lines.maxOfOrNull { it.lineBottom }
+                ?: ChapterProvider.paddingTop.toFloat(),
+            lastTextPage.blocks.maxOfOrNull { it.bottom }
+                ?: ChapterProvider.paddingTop.toFloat(),
+        )
+        val top = contentBottom + TOP_GAP
         val blockHeight = ChapterCommentPageBlock.preferredHeight(summary)
         val block = ChapterCommentPageBlock(summary, top, blockHeight)
         if (block.bottom + END_PADDING <= ChapterProvider.visibleBottom) {

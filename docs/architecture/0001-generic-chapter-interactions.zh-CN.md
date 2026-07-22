@@ -103,7 +103,7 @@ java.hasReaderCapability("chapter-comments", 1)
 - 来源提供段落锚点、评论数量和不透明 ID。
 - 客户端完成模糊匹配、真实分页投影、入口绘制和命中测试。
 - 段级入口是可选能力；书源可以声明 `enabled=false`。
-- v1 入口预设只允许 `dot`、`count`、`labelCount` 和 `none`。
+- v2 入口预设只允许 `dot`、`count`、`labelCount` 和 `none`。
 - 入口由 `ContentTextView` 持有的渲染 overlay 绘制在段落末行或安全边栏，不插入正文字符，不参与复制和 TTS。
 - overlay 使用 `TextLine.lineTop/lineBottom/lineEnd` 和 `ContentTextView.relativeOffset` 计算坐标，因此连续滚动、双页和相邻页绘制共用同一坐标系。
 - `ContentTextView.click()` 先做 overlay 命中测试，再走现有正文图片点击；长按选文路径不进入 overlay 点击。
@@ -113,13 +113,13 @@ java.hasReaderCapability("chapter-comments", 1)
 - 页不是来源数据实体，而是客户端真实布局结果。
 - 客户端收集当前 `TextPage` 可见段落的锚点 ID，并聚合数量。
 - 来源决定是否启用页级入口、标签和点击后的页面；客户端决定手势仲裁和入口位置。
-- v1 分页模式使用向下拖动；连续滚动模式使用阅读菜单降级。
+- v2 分页模式使用向下拖动；连续滚动模式使用阅读菜单降级。
 - 来源可以只启用页级接口而隐藏全部段级入口。
 
 ### 章末接口
 
-- 来源提供全章评论数量、标签和动作数据。
-- 客户端用原生章末 block 显示入口，不把图片或 HTML 写进正文。
+- 来源可以提供不可点击的章末补充、全章评论数量、标签、预览和动作数据。
+- 客户端用原生章末 block 依次显示补充卡片与评论入口，不把图片或 HTML 写进正文。
 - `TextChapterLayout` 把 block 作为非文本页面元素测量：末页空间足够时追加到末页，不足时创建一个可由 `TextPageFactory` 正常访问的新页。
 - `TextPage` 增加独立的 `blocks` 集合；block-only page 的章节位置取章节文本末尾，不能调用空 `textLines.first()`。
 - 章末 block 可以参与最后一页布局和 `pageSize`，但不进入正文字符串、复制、搜索、导出或 TTS。
@@ -154,11 +154,11 @@ java.hasReaderCapability("chapter-comments", 1)
 
 预设和字段是版本化枚举。客户端遇到未知预设时使用该层级默认值，不执行来源提供的任意布局代码。
 
-## 标准载荷 v1
+## 标准载荷 v2
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "segments": [
     {
       "id": "opaque-id",
@@ -173,13 +173,24 @@ java.hasReaderCapability("chapter-comments", 1)
       "actionData": {}
     }
   ],
+  "author": {
+    "label": "作者名",
+    "badge": "作家说",
+    "counts": {"total": 0, "hot": 0},
+    "actionData": null,
+    "previews": ["作者留在章末的补充"]
+  },
   "chapter": {
     "label": "本章说",
     "counts": {
       "total": 227,
       "hot": 12
     },
-    "actionData": {}
+    "actionData": {},
+    "previews": [
+      "书友甲：第一条章末热评",
+      "书友乙：第二条章末热评"
+    ]
   }
 }
 ```
@@ -194,13 +205,16 @@ java.hasReaderCapability("chapter-comments", 1)
 - `counts.total` 和 `counts.hot` 是非负整数；页入口默认对可见段落的 `total` 去重求和，来源可在显示规则中选择展示 `hot`。
 - `pageEligible` 由来源决定该段是否进入页热评集合；客户端不自行定义“热门”。
 - `actionData` 只在动作规则执行时回传，不写日志、不拼接到正文。
+- `author` 是可选的通用章末补充卡片；`actionData=null` 表示只展示、不响应点击，`badge` 是可选短角标。
+- `author.previews` 与 `chapter.previews` 可选，各最多包含 `3` 条摘要；客户端只消费数组，不兼容旧单值摘要字段。
 - `chapter` 可缺失；缺失时不显示原生章末入口。
 
 ### 载荷限制
 
 - 单章摘要最大 `256 KiB`。
 - 单章最多 `200` 个段落锚点。
-- 单个 `id` 最大 `256` 字符，单个 `excerpt` 最大 `512` 字符。
+- 单个 `id` 和 `badge` 最大 `256` 字符，单个 `excerpt` 或预览最大 `512` 字符。
+- 单个章末卡片最多显示 `3` 条 `previews`；超限或元素类型错误时整份载荷失败关闭。
 - `paragraphIndex`、`paragraphCount` 和各类 count 做范围校验与饱和转换。
 - 超限、结构错误或版本未知时整份载荷失败关闭，不影响正文阅读。
 
@@ -261,7 +275,7 @@ paragraphNum = paragraphIndex + 1
 }
 ```
 
-v1 只实现 `sourceWebView`：
+v2 只实现 `sourceWebView`：
 
 - 初始请求通过 `AnalyzeUrl` 使用当前书源上下文获取，并产出最终 URL、HTML 与经过验证的来源 Header；
 - 复用 `BottomWebViewDialog` 的布局和固定高度能力，但必须新增独立的 `SOURCE_SCOPED` 安全模式，不能复用当前不受限的请求转发逻辑；
@@ -294,7 +308,7 @@ v1 只实现 `sourceWebView`：
 
 ### 滚动模式
 
-滚动模式的竖向手势是核心导航，v1 禁止直接抢占。该模式提供阅读菜单中的“本页热评”动作作为可达性降级；只有在后续能证明不破坏连续滚动时，才允许增加边界下拉手势。
+滚动模式的竖向手势是核心导航，v2 禁止直接抢占。该模式提供阅读菜单中的“本页热评”动作作为可达性降级；只有在后续能证明不破坏连续滚动时，才允许增加边界下拉手势。
 
 ### 禁止触发状态
 

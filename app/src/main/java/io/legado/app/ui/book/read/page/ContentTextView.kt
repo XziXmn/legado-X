@@ -338,6 +338,7 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
             }
             page.blocks.firstOrNull { it.contains(x, y, relativeOffset) }?.let { block ->
                 if (block is io.legado.app.ui.book.read.page.entities.ChapterCommentPageBlock) {
+                    if (!block.isInteractive) return@let
                     callBack.openChapterComment(ChapterCommentEvent.chapter(page, block.summary))
                     return true
                 }
