@@ -474,49 +474,27 @@ class PageView(context: Context) : FrameLayout(context) {
     }
 
     /**
-     * Rubber-band the body only while the page-comment pull is active.
-     * Header / footer / status bar stay fixed and drawn above the body so tip
-     * rows never slide off or get covered by translated content.
+     * Qidian-style page rubber-band: move the whole page container (header + body).
+     * Content translation is cleared so only one offset source is active.
      */
-    fun prepareCommentPullChrome() {
-        translationY = 0f
-        binding.vwRoot.clipChildren = true
-        // Later siblings draw on top; elevation keeps chrome above the body.
-        val chromeElevation = 8f * resources.displayMetrics.density
-        binding.vwStatusBar.elevation = chromeElevation
-        binding.llHeader.elevation = chromeElevation
-        binding.vwTopDivider.elevation = chromeElevation
-        binding.contentTextView.elevation = 0f
-    }
-
     fun setCommentPullOffset(offset: Float) {
-        translationY = 0f
-        binding.contentTextView.translationY = offset.coerceAtLeast(0f)
+        binding.contentTextView.translationY = 0f
+        translationY = offset.coerceAtLeast(0f)
     }
 
     fun animateCommentPullReset(durationMs: Long, onEnd: (() -> Unit)? = null) {
-        translationY = 0f
-        binding.contentTextView.animate()
+        binding.contentTextView.translationY = 0f
+        animate()
             .translationY(0f)
             .setDuration(durationMs)
-            .withEndAction {
-                clearCommentPullChrome()
-                onEnd?.invoke()
-            }
+            .withEndAction { onEnd?.invoke() }
             .start()
     }
 
     fun cancelCommentPullAnimation() {
+        animate().cancel()
         binding.contentTextView.animate().cancel()
         setCommentPullOffset(0f)
-        clearCommentPullChrome()
-    }
-
-    private fun clearCommentPullChrome() {
-        binding.vwStatusBar.elevation = 0f
-        binding.llHeader.elevation = 0f
-        binding.vwTopDivider.elevation = 0f
-        binding.contentTextView.elevation = 0f
     }
 
     fun selectStartMove(x: Float, y: Float) {

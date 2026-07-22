@@ -255,7 +255,6 @@ class ReadView(context: Context, attrs: AttributeSet) :
                     if (pullResult.claimedNow) {
                         deferPageDelegateForComment = false
                         cancelPageDelegate()
-                        curPage.prepareCommentPullChrome()
                         touchOwner = TouchOwner.COMMENT
                         isMove = true
                         longPressed = false
@@ -400,17 +399,28 @@ class ReadView(context: Context, attrs: AttributeSet) :
         }
     }
 
+    /**
+     * Qidian-aligned rubber-band: scroll prev/curr/next by the same vertical offset
+     * so the whole page (including tip header) moves as one unit and nothing peeks
+     * from under a fixed chrome layer.
+     */
     private fun setCommentTranslation(offset: Float) {
-        // Move body text only; keep tip header (章名 / 热评) pinned.
-        curPage.setCommentPullOffset(offset)
+        val y = offset.coerceAtLeast(0f)
+        prevPage.setCommentPullOffset(y)
+        curPage.setCommentPullOffset(y)
+        nextPage.setCommentPullOffset(y)
     }
 
     private fun settleCommentTranslation(onEnd: () -> Unit) {
+        prevPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS)
+        nextPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS)
         curPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS, onEnd)
     }
 
     private fun cancelCommentAnimations() {
+        prevPage.cancelCommentPullAnimation()
         curPage.cancelCommentPullAnimation()
+        nextPage.cancelCommentPullAnimation()
         pageCommentPullController.reset()
         pendingPageCommentEvent = null
         deferPageDelegateForComment = false
