@@ -111,7 +111,7 @@ object ChapterCommentActionParser {
             url = data.requiredString("url", MAX_URL_LENGTH),
             title = data.optionalString("title", MAX_TITLE_LENGTH) ?: "评论",
             presentation = presentation,
-            // v1 owns the sheet geometry; a source cannot expand it over the reader.
+            // v2 owns the sheet geometry; a source cannot expand it over the reader.
             heightRatio = FIXED_HEIGHT_RATIO,
         )
     }

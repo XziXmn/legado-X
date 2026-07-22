@@ -40,7 +40,7 @@
 
 * 检查当前阅读器是否支持版本化通用能力。未知能力返回 `false`。
 ```js
-java.hasReaderCapability(name: String, minVersion: Int): Boolean
+java.hasReaderCapability(name: String, version: Int): Boolean
 ```
 
 ### [RssJsExtensions](https://github.com/Luoyacheng/legado-E/blob/main/app/src/main/java/io/legado/app/ui/rss/read/RssJsExtensions.kt)独有函数

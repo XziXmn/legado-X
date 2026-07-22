@@ -93,8 +93,8 @@ interface JsExtensions : JsEncodeUtils {
 
     /** Return whether this reader implements a versioned, source-neutral capability. */
     @JavascriptInterface
-    fun hasReaderCapability(name: String, minVersion: Int): Boolean {
-        return name == "chapter-comments" && minVersion in 1..2
+    fun hasReaderCapability(name: String, version: Int): Boolean {
+        return name == "chapter-comments" && version == 2
     }
 
     private val context: CoroutineContext

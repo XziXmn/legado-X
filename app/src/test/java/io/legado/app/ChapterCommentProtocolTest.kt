@@ -115,7 +115,7 @@ class ChapterCommentProtocolTest {
     fun analyzeRuleExposesOnlyKnownCapabilityVersion() {
         val analyzeRule = AnalyzeRule()
 
-        assertEquals(true, analyzeRule.evalJS("java.hasReaderCapability('chapter-comments', 1)"))
+        assertEquals(false, analyzeRule.evalJS("java.hasReaderCapability('chapter-comments', 1)"))
         assertEquals(true, analyzeRule.evalJS("java.hasReaderCapability('chapter-comments', 2)"))
         assertEquals(false, analyzeRule.evalJS("java.hasReaderCapability('chapter-comments', 3)"))
         assertEquals(false, analyzeRule.evalJS("java.hasReaderCapability('unknown', 1)"))

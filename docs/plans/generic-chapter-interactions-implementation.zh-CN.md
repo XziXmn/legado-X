@@ -4,10 +4,10 @@
 
 代码实现和自动化门禁已完成，当前阶段为真机验收：
 
-- 已实现来源无关的 v1 协议、能力探测、独立缓存、相邻章摘要预加载、锚点解析、真实分页投影、段级 overlay、页级下拉、章末 block 和滚动模式菜单入口。
+- 已实现来源无关的 v2 协议、能力探测、独立缓存、相邻章摘要预加载、锚点解析、真实分页投影、段级 overlay、页级下拉、章末 block 和滚动模式菜单入口。
 - 已实现 `SOURCE_SCOPED` 动作弹窗：动作与摘要规则同源、认证源 DNS 固定、跨源只允许公网 HTTPS 且剥离凭据、系统 TLS 校验、重定向逐跳校验、固定 `0.78` 高度。
 - 正式版：阅读 / `io.legado.app.release`；测试版：阅读·测试 / `io.legado.app.beta`。
-- 已完成 LegadoHub 首个适配：增强客户端纯正文；普通客户端只追加章末兼容入口；评论数据继续由 Catalog 和插件体系提供。
+- 已完成 LegadoHub 首个适配：正文不注入评论入口，定制客户端通过原生 v2 契约显示评论；评论数据继续由 Catalog 和插件体系提供。
 - 自动验证结果：Legado-E `test`、`lint`、`assembleAppDebug`、`assembleAppRelease` 均通过；LegadoHub 定向测试 `24 passed`，完整门禁 `383 passed, 5 skipped`，22 个插件校验和前端 `70 passed` 均通过。
 - 未完成项仅为需要设备的 `connectedAppDebugAndroidTest` 与本文第 7 阶段真机矩阵；它们由人工测试承担，不阻断测试版 APK 交付，但阻断正式发布结论。
 
@@ -21,7 +21,7 @@
 - 书源可选择在段落末尾提供段级评论入口；
 - 当前页热评由真实分页后的段落集合决定；
 - 章末显示统一入口；
-- 普通客户端不显示页热评，只保留章末入口；
+- 普通客户端不显示任何评论入口，但正文阅读不受影响；
 - 当前章和相邻预加载章节都有自己的评论摘要；
 - 所有评论数据仍经过书源或其后端插件体系；
 - 客户端代码对具体站点和后端零感知。
@@ -31,9 +31,9 @@
 - 不在客户端实现起点私有 API、签名、解密或登录。
 - 不新增绕过插件的评论接口。
 - 不实现发评论、点赞、删除或审核。
-- 不把完整评论列表原生化；v1 仍通过来源 Web 页面展示。
+- 不把完整评论列表原生化；v2 仍通过来源 Web 页面展示。
 - 不修改普通 Legado 客户端代码。
-- 不在 v1 劫持连续滚动模式的竖向导航。
+- 不在 v2 劫持连续滚动模式的竖向导航。
 
 ## 3. 当前基线
 
@@ -129,7 +129,7 @@ ui/book/read/comment/
 1. 新增 `ChapterCommentRule` 并挂到 `ContentRule.chapterComment`。
 2. 新增段级载荷、页级聚合配置、章末信息、显示描述和动作 DTO。
 3. 新增严格 parser 和资源上限。
-4. 在公共 `io.legado.app.help.JsExtensions` 增加 `hasReaderCapability(name, minVersion)`；`AnalyzeRule : JsExtensions` 自动向所有书源规则 JS 注入，不能只加在 Activity/WebView 扩展。
+4. 在公共 `io.legado.app.help.JsExtensions` 增加 `hasReaderCapability(name, version)`；`AnalyzeRule : JsExtensions` 自动向所有书源规则 JS 注入，当前只对精确协议版本 `2` 返回 `true`，不能只加在 Activity/WebView 扩展。
 5. 更新 JS 帮助文档和书源 JSON 示例。
 
 测试：
@@ -300,19 +300,18 @@ Idle -> Tracking -> Pulling -> Armed -> Settling -> Opening -> Idle
    - 页热评候选 -> `pageEligible`
 4. `action` 分别把段级 ID、页级 ID集合和章末事件转换为书源自己的展示地址。
 5. 首个起点适配默认关闭段级入口、启用页级下拉和章末入口；切换只改书源 `display`，不改客户端。
-6. 能力探测成功时不再向正文插入页气泡或章末图片。
-7. 能力探测失败时只追加章末入口，不追加页气泡或段级入口。
+6. 正文规则不执行能力探测分支，也不插入页气泡、章末图片或 HTML 评论入口。
+7. 普通客户端只读取正文并忽略未知 `chapterComment` 字段，不提供评论降级入口。
 8. 后端继续使用 `Catalog -> PluginScheduler -> Web/App 插件`。
-9. 更新书源 `lastUpdateTime`，并记录普通客户端需要一次性清理旧章节缓存。
+9. 更新书源 `lastUpdateTime`，确保定制客户端重新获取 v2 规则。
 
 自动测试：
 
-- 生成 JSON 可被普通客户端旧模型解析；
+- 生成 JSON 的正文规则不含评论图片、HTML 或 `showBrowser` 兼容逻辑；
 - 普通客户端重导出可能丢失增强字段，迁移文档要求从原始订阅 URL 重新导入；
-- 无能力方法时只生成章末入口；
-- 有 v1 能力时正文纯净；
-- 能力判断和正文分支在一次规则执行中完成，不存在先追加后删除的竞态；
-- 定制客户端命中旧缓存 sidecar 时会重抓，普通客户端旧缓存行为有明确升级提示；
+- `chapterComment.protocolVersion` 与载荷 `version` 都严格等于 `2`；
+- v1 载荷和能力版本被明确拒绝；
+- 定制客户端命中旧缓存 sidecar 时会重抓当前章和预加载窗口；
 - 当前章、预加载下一章生成不同摘要请求；
 - App 插件优先、Web 插件降级仍由后端 catalog 决定；
 - VIP 评论、回复分页和授权契约不退化；
@@ -342,7 +341,7 @@ Idle -> Tracking -> Pulling -> Armed -> Settling -> Opening -> Idle
 - 当前章和预加载后续章节；
 - Wi-Fi 断开、401、登录过期、慢网络；
 - 免费章、VIP 预览章和已购买章；
-- 普通客户端只显示章末入口。
+- 普通客户端正文可读且不显示评论入口。
 
 人工验收通过前，不发布正式 APK。
 
@@ -386,7 +385,7 @@ Idle -> Tracking -> Pulling -> Armed -> Settling -> Opening -> Idle
 
 1. 客户端代码搜索不到书源、站点或后端专用判断。
 2. 两个结构不同的虚拟书源通过同一协议测试。
-3. 普通客户端只显示章末入口。
+3. 普通客户端正文可读且不显示评论入口。
 4. 预加载章节可在切换后立即获得自己的页热评。
 5. 下拉手势不破坏翻页、选文、自动翻页和朗读。
 6. 评论请求仍可追踪到插件调度链。
@@ -416,6 +415,6 @@ Idle -> Tracking -> Pulling -> Armed -> Settling -> Opening -> Idle
 
 - 定制 APK 展示名为“小说聚合阅读”，使用独立 application ID；
 - 定制分支使用 `codex/legadohub-reader`，默认推送到 `XziXmn/legado-X`；原仓库只作为上游同步源；
-- 连续滚动模式 v1 使用阅读菜单中的“本页热评”；
+- 连续滚动模式 v2 使用阅读菜单中的“本页热评”；
 - 原生章末入口文案为“本章说”，评论弹窗高度固定为屏幕的 `0.78`；
-- 普通客户端继续通过书源章末入口兼容，升级后需按发布提示清理旧章节缓存并从原始订阅 URL 重新导入书源。
+- 评论能力只面向支持 v2 契约的定制客户端；普通客户端不提供降级入口。
