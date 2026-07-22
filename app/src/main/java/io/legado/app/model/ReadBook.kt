@@ -1037,6 +1037,7 @@ object ReadBook : CoroutineScope by MainScope() {
         chapter: BookChapter,
         textChapter: TextChapter,
     ) {
+        chapterCommentJobs.remove(chapter.index)?.cancel()
         val source = bookSource
         val rule = source?.getContentRule()?.chapterComment
         val display = rule?.display
@@ -1050,7 +1051,6 @@ object ReadBook : CoroutineScope by MainScope() {
             return
         }
 
-        chapterCommentJobs.remove(chapter.index)?.cancel()
         textChapter.chapterCommentRule = rule
         textChapter.chapterCommentState = ChapterCommentState.Loading
         val priority = if (chapter.index == durChapterIndex) {

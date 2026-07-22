@@ -48,7 +48,10 @@ class ChapterCommentProtocolTest {
                 "pageEligible": true,
                 "actionData": {"paragraphId": "10"}
               }],
-              "chapter": {"counts": {"total": 227}}
+              "chapter": {
+                "counts": {"total": 227},
+                "preview": "这是一条章末热评摘要"
+              }
             }
             """.trimIndent()
         )
@@ -58,6 +61,7 @@ class ChapterCommentProtocolTest {
         assertEquals(1, payload.segments.single().paragraphCount)
         assertEquals(36, payload.segments.single().counts.total)
         assertEquals("本章说", payload.chapter?.label)
+        assertEquals("这是一条章末热评摘要", payload.chapter?.preview)
         assertNotNull(payload.segments.single().actionData)
     }
 
@@ -67,6 +71,9 @@ class ChapterCommentProtocolTest {
         assertInvalid("""{"version":1,"segments":[{"id":"x","paragraphIndex":-1}]}""")
         assertInvalid(
             """{"version":1,"segments":[{"id":"${"x".repeat(257)}","paragraphIndex":0}]}"""
+        )
+        assertInvalid(
+            """{"version":1,"segments":[],"chapter":{"preview":"${"热".repeat(513)}"}}"""
         )
         val segments = (0..ChapterCommentParser.MAX_SEGMENTS).joinToString(",") {
             """{"id":"$it","paragraphIndex":$it}"""

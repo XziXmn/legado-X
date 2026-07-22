@@ -2,10 +2,13 @@ package io.legado.app.ui.book.read.page
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.widget.FrameLayout
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -20,6 +23,7 @@ import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.help.config.ReadTipConfig
 import io.legado.app.model.ReadBook
 import io.legado.app.ui.book.read.ReadBookActivity
+import io.legado.app.ui.book.read.comment.PageCommentOverlay
 import io.legado.app.ui.book.read.page.entities.TextLine
 import io.legado.app.ui.book.read.page.entities.TextPage
 import io.legado.app.ui.book.read.page.entities.TextPos
@@ -98,6 +102,21 @@ class PageView(context: Context) : FrameLayout(context) {
             tvHeaderLeft.setColor(tipColor)
             tvHeaderMiddle.setColor(tipColor)
             tvHeaderRight.setColor(tipColor)
+            tvPageComment.apply {
+                setTextColor(ColorUtils.setAlphaComponent(tipColor, 190))
+                typeface = ChapterProvider.typeface
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, tvHeaderLeft.textSize * PAGE_COMMENT_TEXT_SCALE)
+                setPadding(
+                    PAGE_COMMENT_HORIZONTAL_PADDING_DP.dpToPx(),
+                    PAGE_COMMENT_VERTICAL_PADDING_DP.dpToPx(),
+                    PAGE_COMMENT_HORIZONTAL_PADDING_DP.dpToPx(),
+                    PAGE_COMMENT_VERTICAL_PADDING_DP.dpToPx(),
+                )
+                background = GradientDrawable().apply {
+                    cornerRadius = PAGE_COMMENT_CORNER_RADIUS_DP.dpToPx().toFloat()
+                    setColor(ColorUtils.setAlphaComponent(tipColor, 24))
+                }
+            }
             tvFooterLeft.setColor(tipColor)
             tvFooterMiddle.setColor(tipColor)
             tvFooterRight.setColor(tipColor)
@@ -361,6 +380,10 @@ class PageView(context: Context) : FrameLayout(context) {
     fun setProgress(textPage: TextPage) = textPage.apply {
         tvBookName?.setTextIfNotEqual(ReadBook.book?.name)
         tvTitle?.setTextIfNotEqual(textPage.title)
+        PageCommentOverlay.label(textPage).let { label ->
+            binding.tvPageComment.text = label.orEmpty()
+            binding.tvPageComment.isGone = label == null
+        }
         val readProgress = readProgress
         tvTotalProgress?.setTextIfNotEqual(readProgress)
         tvTotalProgress1?.setTextIfNotEqual("${chapterIndex.plus(1)}/${chapterSize}")
@@ -373,6 +396,13 @@ class PageView(context: Context) : FrameLayout(context) {
             tvPageAndTotal?.setTextIfNotEqual("${index.plus(1)}/$pageSize  $readProgress")
             tvPage?.setTextIfNotEqual("${index.plus(1)}/$pageSize")
         }
+    }
+
+    companion object {
+        private const val PAGE_COMMENT_TEXT_SCALE = 0.92f
+        private const val PAGE_COMMENT_CORNER_RADIUS_DP = 4
+        private const val PAGE_COMMENT_HORIZONTAL_PADDING_DP = 7
+        private const val PAGE_COMMENT_VERTICAL_PADDING_DP = 2
     }
 
     fun setAutoPager(autoPager: AutoPager?) {

@@ -24,6 +24,7 @@ data class ChapterCommentSummary(
     val label: String,
     val counts: ChapterCommentCounts,
     val actionData: JsonElement?,
+    val preview: String? = null,
 )
 
 data class ChapterCommentPayload(
@@ -40,6 +41,7 @@ object ChapterCommentParser {
     const val MAX_SEGMENTS = 200
     const val MAX_ID_LENGTH = 256
     const val MAX_EXCERPT_LENGTH = 512
+    const val MAX_PREVIEW_LENGTH = 512
 
     /**
      * Parse and validate a normalized summary payload.
@@ -106,6 +108,9 @@ object ChapterCommentParser {
             label = data.optionalString("label", MAX_ID_LENGTH) ?: "本章说",
             counts = parseCounts(data.get("counts"), "chapter.counts"),
             actionData = data.get("actionData")?.takeUnless(JsonElement::isJsonNull)?.deepCopy(),
+            preview = data.optionalString("preview", MAX_PREVIEW_LENGTH)
+                ?.trim()
+                ?.takeIf(String::isNotEmpty),
         )
     }
 
