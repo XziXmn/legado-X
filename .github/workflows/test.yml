@@ -253,8 +253,11 @@ jobs:
 
   prerelease:
     needs: [ prepare, build ]
-    if: github.event_name != 'pull_request' && github.repository == 'Luoyacheng/legado-E'
+    # Upstream publishes only from Luoyacheng/legado-E; this fork also publishes from origin.
+    if: github.event_name != 'pull_request' && (github.repository == 'Luoyacheng/legado-E' || github.repository == 'XziXmn/legado-X')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:

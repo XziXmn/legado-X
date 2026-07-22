@@ -18,7 +18,7 @@ static def releaseTime() {
     return new Date().format("yy.MMddHH", TimeZone.getTimeZone("GMT+8"))
 }
 
-def name = "legadohub-reader"
+def name = "legado"
 def version = "3." + releaseTime()
 def gitCommits = Integer.parseInt('git rev-list HEAD --count'.execute().text.trim())
 
@@ -46,7 +46,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId "io.legado.app.legadohub"
+        applicationId "io.legado.app"
         minSdk 21
         targetSdk 36
         versionCode 10000 + gitCommits
@@ -76,7 +76,14 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 signingConfig signingConfigs.myConfig
             }
-            manifestPlaceholders.put("app_name", "@string/app_name_legadohub")
+            applicationIdSuffix '.release'
+            if (getApplicationIdSuffix() == '.releaseA') {
+                manifestPlaceholders.put("app_name", "@string/app_name_a")
+            } else if (getApplicationIdSuffix() == '.releaseS') {
+                manifestPlaceholders.put("app_name", "@string/app_name_s")
+            } else {
+                manifestPlaceholders.put("app_name", "@string/app_name")
+            }
 
             minifyEnabled true
             shrinkResources = true
@@ -86,7 +93,7 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 signingConfig signingConfigs.myConfig
             }
-            manifestPlaceholders.put("app_name", "@string/app_name_legadohub")
+            manifestPlaceholders.put("app_name", "@string/app_name")
 
             applicationIdSuffix '.debug'
             versionNameSuffix 'debug'
