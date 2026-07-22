@@ -71,6 +71,8 @@ class ChapterCommentProjectionTest {
         assertEquals(listOf("a"), projection.segmentIds)
         assertEquals(Int.MAX_VALUE, projection.totalCount)
         assertEquals(1, projection.hotCount)
+        assertEquals(Int.MAX_VALUE, ChapterCommentPageProjector.count(projection, "total"))
+        assertEquals(1, ChapterCommentPageProjector.count(projection, "hot"))
         assertTrue(ChapterCommentPageProjector.project(emptyList(), anchors).isEmpty)
     }
 

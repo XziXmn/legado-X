@@ -180,6 +180,10 @@ object ChapterCommentPageProjector {
         )
     }
 
+    fun count(projection: PageChapterCommentProjection, countField: String): Int {
+        return if (countField == "hot") projection.hotCount else projection.totalCount
+    }
+
     private inline fun <T> Iterable<T>.saturatedSum(value: (T) -> Int): Int {
         var total = 0L
         forEach { total = min(Int.MAX_VALUE.toLong(), total + value(it)) }

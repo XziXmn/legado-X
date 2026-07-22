@@ -79,6 +79,7 @@ import io.legado.app.lib.dialogs.selector
 import io.legado.app.model.Download
 import io.legado.app.model.chapterComment.HttpOrigin
 import io.legado.app.model.chapterComment.SourceScopedNetworkContext
+import io.legado.app.model.chapterComment.SourceScopedInitialDocumentGate
 import io.legado.app.model.chapterComment.SourceScopedRequestPolicy
 import io.legado.app.model.chapterComment.newSourceScopedHttpClient
 import io.legado.app.ui.file.HandleFileContract
@@ -159,6 +160,7 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
     private var sourceScopedNetworkContext: SourceScopedNetworkContext? = null
     private var sourceScopedHttpClient: OkHttpClient? = null
     private var sourceScopedHeaders: Map<String, String> = emptyMap()
+    private val sourceScopedInitialDocumentGate = SourceScopedInitialDocumentGate()
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -627,6 +629,9 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
                 currentWebView.addJavascriptInterface(WebCacheManager, nameCache)
             }
         }
+        if (securityMode == SecurityMode.SOURCE_SCOPED) {
+            sourceScopedInitialDocumentGate.arm(url)
+        }
         currentWebView.loadDataWithBaseURL(url, html, "text/html", "utf-8", url)
     }
 
@@ -930,6 +935,9 @@ class BottomWebViewDialog() : BottomSheetDialogFragment(R.layout.dialog_web_view
         ): WebResourceResponse? {
             val url = request.url.toString()
             if (securityMode == SecurityMode.SOURCE_SCOPED) {
+                if (sourceScopedInitialDocumentGate.consume(url, request.method, request.isForMainFrame)) {
+                    return super.shouldInterceptRequest(view, request)
+                }
                 return runBlocking(IO) { getSourceScopedResponse(request) }
             }
             if (request.isForMainFrame) {

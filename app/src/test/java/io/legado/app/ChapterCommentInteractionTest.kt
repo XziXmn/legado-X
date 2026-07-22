@@ -2,6 +2,7 @@ package io.legado.app
 
 import io.legado.app.model.chapterComment.ChapterCommentActionParser
 import io.legado.app.model.chapterComment.SourceScopedDns
+import io.legado.app.model.chapterComment.SourceScopedInitialDocumentGate
 import io.legado.app.model.chapterComment.SourceScopedRequestPolicy
 import io.legado.app.ui.book.read.comment.PageCommentPullController
 import org.junit.Assert.assertEquals
@@ -87,6 +88,29 @@ class ChapterCommentInteractionTest {
                 origin,
             ) { listOf(InetAddress.getByName("203.0.113.10")) }
         )
+    }
+
+    @Test
+    fun sourceScopedInlineDocumentIsAllowedOnlyOnceForTheArmedMainFrame() {
+        val gate = SourceScopedInitialDocumentGate()
+        val inlineDocument = "data:text/html;charset=utf-8;base64,PGh0bWw+"
+        val baseUrl = "https://example.test/comments"
+
+        gate.arm(baseUrl)
+        assertFalse(gate.consume(inlineDocument, "GET", isForMainFrame = false))
+        assertTrue(gate.consume(inlineDocument, "GET", isForMainFrame = true))
+        assertFalse(gate.consume(inlineDocument, "GET", isForMainFrame = true))
+
+        gate.arm(baseUrl)
+        assertTrue(gate.consume(baseUrl, "GET", isForMainFrame = true))
+        assertFalse(gate.consume(baseUrl, "GET", isForMainFrame = true))
+
+        gate.arm(baseUrl)
+        assertFalse(gate.consume("https://example.test/other", "GET", isForMainFrame = true))
+        assertFalse(gate.consume(inlineDocument, "GET", isForMainFrame = true))
+
+        gate.arm(baseUrl)
+        assertFalse(gate.consume(inlineDocument, "POST", isForMainFrame = true))
     }
 
     @Test

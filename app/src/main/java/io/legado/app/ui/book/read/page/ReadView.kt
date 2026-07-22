@@ -19,6 +19,7 @@ import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
 import io.legado.app.model.chapterComment.ChapterCommentEvent
+import io.legado.app.model.chapterComment.ChapterCommentPageProjector
 import io.legado.app.ui.book.read.comment.PageCommentPullController
 import io.legado.app.service.BaseReadAloudService
 import io.legado.app.ui.book.read.ContentEditDialog
@@ -398,7 +399,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
         }
         val projection = chapter.pageCommentProjection(page, leftPage)
         if (projection.isEmpty) return null
-        val count = if (rule.countField == "hot") projection.hotCount else projection.totalCount
+        val count = ChapterCommentPageProjector.count(projection, rule.countField)
         return ChapterCommentEvent.page(page, projection, count)
     }
 

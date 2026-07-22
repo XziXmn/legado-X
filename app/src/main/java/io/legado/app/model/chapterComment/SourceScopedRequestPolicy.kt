@@ -20,6 +20,38 @@ data class SourceScopedNetworkContext(
     val pinnedAddresses: List<String>,
 )
 
+/** Allows only the inline main document created by one loadDataWithBaseURL call. */
+internal class SourceScopedInitialDocumentGate {
+
+    private var pending = false
+    private var expectedBaseUrl: String? = null
+
+    fun arm(baseUrl: String) {
+        pending = true
+        expectedBaseUrl = baseUrl
+    }
+
+    fun consume(url: String, method: String, isForMainFrame: Boolean): Boolean {
+        if (!isForMainFrame) return false
+        val allowed = pending &&
+                method.equals("GET", ignoreCase = true) &&
+                (isHtmlDataUrl(url) || url == expectedBaseUrl)
+        pending = false
+        expectedBaseUrl = null
+        return allowed
+    }
+
+    private fun isHtmlDataUrl(url: String): Boolean {
+        if (!url.startsWith(DATA_HTML_PREFIX, ignoreCase = true)) return false
+        return url.getOrNull(DATA_HTML_PREFIX.length) == ';' ||
+                url.getOrNull(DATA_HTML_PREFIX.length) == ','
+    }
+
+    private companion object {
+        const val DATA_HTML_PREFIX = "data:text/html"
+    }
+}
+
 /** Network boundary for a source-authenticated comment WebView. */
 object SourceScopedRequestPolicy {
 
