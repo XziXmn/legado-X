@@ -80,6 +80,12 @@ class ReadView(context: Context, attrs: AttributeSet) :
     private var pendingPageCommentEvent: ChapterCommentEvent? = null
     /** When true, page-turn delegate waits until comment pull is ruled out. */
     private var deferPageDelegateForComment = false
+    /**
+     * While the page-comment rubber-band is active (including settle), do not paint
+     * page-turn screenshots. Those are drawn in untranslated coordinates and appear
+     * as a second tip bar stuck at the original Y while the live page moves down.
+     */
+    private var suppressPageTurnOverlay = false
 
     //起始点
     var startX: Float = 0f
@@ -166,7 +172,9 @@ class ReadView(context: Context, attrs: AttributeSet) :
 
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
-        pageDelegate?.onDraw(canvas)
+        if (!suppressPageTurnOverlay) {
+            pageDelegate?.onDraw(canvas)
+        }
         autoPager.onDraw(canvas)
     }
 
@@ -254,7 +262,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 if (pullResult.claimed) {
                     if (pullResult.claimedNow) {
                         deferPageDelegateForComment = false
-                        cancelPageDelegate()
+                        beginCommentPullVisuals()
                         touchOwner = TouchOwner.COMMENT
                         isMove = true
                         longPressed = false
@@ -362,6 +370,27 @@ class ReadView(context: Context, attrs: AttributeSet) :
         pageDelegate?.resetTouchState()
     }
 
+    /**
+     * Claim comment pull: kill page-turn overlays and keep only the live current page.
+     * Off-screen page views stay invisible so their tip bars cannot show at y=0.
+     */
+    private fun beginCommentPullVisuals() {
+        suppressPageTurnOverlay = true
+        cancelPageDelegate()
+        prevPage.invisible()
+        nextPage.invisible()
+        // Keep prev off-screen if anything re-shows it during settle.
+        if (width > 0) {
+            prevPage.x = -width.toFloat()
+        }
+        invalidate()
+    }
+
+    private fun endCommentPullVisuals() {
+        suppressPageTurnOverlay = false
+        invalidate()
+    }
+
     /** After comment-pull tracking rejects a gesture, resume page-turn from this stream. */
     private fun handOffToPageDelegateIfNeeded(event: MotionEvent) {
         if (!deferPageDelegateForComment) return
@@ -393,6 +422,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
         removeCallbacks(longPressRunnable)
         settleCommentTranslation {
             pageCommentPullController.finishSettling()
+            endCommentPullVisuals()
             if (result.open && event != null && callBack.canOpenChapterComment) {
                 callBack.openChapterComment(event)
             }
@@ -400,20 +430,22 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     /**
-     * Qidian-aligned rubber-band: scroll prev/curr/next by the same vertical offset
-     * so the whole page (including tip header) moves as one unit and nothing peeks
-     * from under a fixed chrome layer.
+     * Qidian-aligned rubber-band: move the live page as one unit (header + body).
+     * Only [curPage] is visible; prev/next stay invisible and off-screen.
      */
     private fun setCommentTranslation(offset: Float) {
         val y = offset.coerceAtLeast(0f)
-        prevPage.setCommentPullOffset(y)
+        // Keep siblings locked out of the visible stack while pulling.
+        prevPage.invisible()
+        nextPage.invisible()
         curPage.setCommentPullOffset(y)
-        nextPage.setCommentPullOffset(y)
     }
 
     private fun settleCommentTranslation(onEnd: () -> Unit) {
-        prevPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS)
-        nextPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS)
+        prevPage.cancelCommentPullAnimation()
+        nextPage.cancelCommentPullAnimation()
+        prevPage.setCommentPullOffset(0f)
+        nextPage.setCommentPullOffset(0f)
         curPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS, onEnd)
     }
 
@@ -421,6 +453,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
         prevPage.cancelCommentPullAnimation()
         curPage.cancelCommentPullAnimation()
         nextPage.cancelCommentPullAnimation()
+        endCommentPullVisuals()
         pageCommentPullController.reset()
         pendingPageCommentEvent = null
         deferPageDelegateForComment = false
