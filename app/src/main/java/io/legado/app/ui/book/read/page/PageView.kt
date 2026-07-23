@@ -474,27 +474,28 @@ class PageView(context: Context) : FrameLayout(context) {
     }
 
     /**
-     * Qidian-style page rubber-band: move the whole page container (header + body).
-     * Content translation is cleared so only one offset source is active.
+     * Clear residual pull transforms. ReadView now applies the rubber-band offset via
+     * exclusive canvas translation in dispatchDraw; page views must stay at translationY=0
+     * so tip + body cannot desync or double-paint.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun setCommentPullOffset(offset: Float) {
+        // Intentionally ignore offset — visual pull is owned by ReadView.
         binding.contentTextView.translationY = 0f
-        translationY = offset.coerceAtLeast(0f)
+        translationY = 0f
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun animateCommentPullReset(durationMs: Long, onEnd: (() -> Unit)? = null) {
-        binding.contentTextView.translationY = 0f
-        animate()
-            .translationY(0f)
-            .setDuration(durationMs)
-            .withEndAction { onEnd?.invoke() }
-            .start()
+        cancelCommentPullAnimation()
+        onEnd?.invoke()
     }
 
     fun cancelCommentPullAnimation() {
         animate().cancel()
         binding.contentTextView.animate().cancel()
-        setCommentPullOffset(0f)
+        binding.contentTextView.translationY = 0f
+        translationY = 0f
     }
 
     fun selectStartMove(x: Float, y: Float) {

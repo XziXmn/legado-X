@@ -1,5 +1,8 @@
 package io.legado.app.ui.book.read.page
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -81,11 +84,18 @@ class ReadView(context: Context, attrs: AttributeSet) :
     /** When true, page-turn delegate waits until comment pull is ruled out. */
     private var deferPageDelegateForComment = false
     /**
-     * While the page-comment rubber-band is active (including settle), do not paint
-     * page-turn screenshots. Those are drawn in untranslated coordinates and appear
-     * as a second tip bar stuck at the original Y while the live page moves down.
+     * While the page-comment rubber-band is active (including settle), take the
+     * exclusive draw path in [dispatchDraw]: only [curPage] is painted, offset by
+     * [commentPullOffsetY] via canvas translation.
+     *
+     * Why not View.translationY + normal dispatchDraw?
+     * Horizontal page-turn paints untranslated screenshots on top of live children.
+     * Even with those suppressed, optimizeRender RenderNodes / hardware layers can
+     * leave a one-frame tip ghost at y=0. Exclusive draw removes every second paint.
      */
-    private var suppressPageTurnOverlay = false
+    private var commentPullExclusiveDraw = false
+    private var commentPullOffsetY = 0f
+    private var commentPullSettleAnimator: ValueAnimator? = null
 
     //起始点
     var startX: Float = 0f
@@ -171,10 +181,21 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     override fun dispatchDraw(canvas: Canvas) {
-        super.dispatchDraw(canvas)
-        if (!suppressPageTurnOverlay) {
-            pageDelegate?.onDraw(canvas)
+        if (commentPullExclusiveDraw) {
+            // Fill the revealed top gap so we never show a stale frame or empty hole.
+            val gapColor = ReadBookConfig.bgMeanColor
+            if (gapColor != 0) {
+                canvas.drawColor(gapColor)
+            }
+            val save = canvas.save()
+            canvas.translate(0f, commentPullOffsetY)
+            // Draw only the live current page. Skip prev/next and page-turn screenshots.
+            drawChild(canvas, curPage, drawingTime)
+            canvas.restoreToCount(save)
+            return
         }
+        super.dispatchDraw(canvas)
+        pageDelegate?.onDraw(canvas)
         autoPager.onDraw(canvas)
     }
 
@@ -371,23 +392,37 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     /**
-     * Claim comment pull: kill page-turn overlays and keep only the live current page.
-     * Off-screen page views stay invisible so their tip bars cannot show at y=0.
+     * Claim comment pull: abort page-turn, clear residual transforms, and switch to
+     * exclusive canvas-translate draw so the tip bar cannot exist at two Y positions.
      */
     private fun beginCommentPullVisuals() {
-        suppressPageTurnOverlay = true
+        commentPullSettleAnimator?.cancel()
+        commentPullSettleAnimator = null
         cancelPageDelegate()
+        // Kill any leftover View.translationY from earlier pull implementations.
+        prevPage.cancelCommentPullAnimation()
+        nextPage.cancelCommentPullAnimation()
+        curPage.cancelCommentPullAnimation()
         prevPage.invisible()
         nextPage.invisible()
-        // Keep prev off-screen if anything re-shows it during settle.
         if (width > 0) {
             prevPage.x = -width.toFloat()
+        }
+        commentPullExclusiveDraw = true
+        // Keep a solid parent fill under the translated page for the rubber-band gap.
+        if (ReadBookConfig.bgMeanColor != 0) {
+            setBackgroundColor(ReadBookConfig.bgMeanColor)
         }
         invalidate()
     }
 
     private fun endCommentPullVisuals() {
-        suppressPageTurnOverlay = false
+        commentPullExclusiveDraw = false
+        commentPullOffsetY = 0f
+        commentPullSettleAnimator?.cancel()
+        commentPullSettleAnimator = null
+        curPage.cancelCommentPullAnimation()
+        background = null
         invalidate()
     }
 
@@ -430,26 +465,57 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     /**
-     * Qidian-aligned rubber-band: move the live page as one unit (header + body).
-     * Only [curPage] is visible; prev/next stay invisible and off-screen.
+     * Qidian-aligned rubber-band offset. The visual move is applied in [dispatchDraw]
+     * (canvas translate of [curPage] only) — never via View.translationY — so header
+     * and body stay one unit and no second tip can stick at y=0.
      */
     private fun setCommentTranslation(offset: Float) {
         val y = offset.coerceAtLeast(0f)
-        // Keep siblings locked out of the visible stack while pulling.
-        prevPage.invisible()
-        nextPage.invisible()
-        curPage.setCommentPullOffset(y)
+        if (commentPullOffsetY == y) return
+        commentPullOffsetY = y
+        // Keep page views free of residual property transforms.
+        curPage.setCommentPullOffset(0f)
+        invalidate()
     }
 
     private fun settleCommentTranslation(onEnd: () -> Unit) {
-        prevPage.cancelCommentPullAnimation()
-        nextPage.cancelCommentPullAnimation()
-        prevPage.setCommentPullOffset(0f)
-        nextPage.setCommentPullOffset(0f)
-        curPage.animateCommentPullReset(PAGE_COMMENT_SETTLE_MS, onEnd)
+        commentPullSettleAnimator?.cancel()
+        val start = commentPullOffsetY
+        if (start <= 0f) {
+            commentPullOffsetY = 0f
+            onEnd()
+            return
+        }
+        commentPullSettleAnimator = ValueAnimator.ofFloat(start, 0f).apply {
+            duration = PAGE_COMMENT_SETTLE_MS
+            addUpdateListener { anim ->
+                commentPullOffsetY = anim.animatedValue as Float
+                invalidate()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+
+                override fun onAnimationCancel(animation: Animator) {
+                    cancelled = true
+                    commentPullSettleAnimator = null
+                }
+
+                override fun onAnimationEnd(animation: Animator) {
+                    // Cancel also delivers onAnimationEnd; only complete a natural settle.
+                    commentPullOffsetY = 0f
+                    commentPullSettleAnimator = null
+                    if (!cancelled) {
+                        onEnd()
+                    }
+                }
+            })
+            start()
+        }
     }
 
     private fun cancelCommentAnimations() {
+        commentPullSettleAnimator?.cancel()
+        commentPullSettleAnimator = null
         prevPage.cancelCommentPullAnimation()
         curPage.cancelCommentPullAnimation()
         nextPage.cancelCommentPullAnimation()

@@ -5,7 +5,7 @@
 **2026/07/23**
 - 修复 Release 下点击段评/页热评/本章说报 `unsupported chapter comment scope`（action 事件用固定 JSON 键名，避免 R8 混淆字段）
 - 页热评下拉对齐起点：整页（含标题/热评）同步竖滑后回弹
-- 下拉期间屏蔽翻页截图绘制并隐藏 prev/next，消除原位置标题栏闪烁
+- 下拉改为独占 canvas 平移绘制（仅当前页），彻底消除原位置标题栏双绘闪烁
 - 章节评论严格使用通用 v2 协议；`hasReaderCapability` 精确匹配版本 2
 - 正式版：阅读 / `io.legado.app.release`（可覆盖常见安装）
 - 测试版：阅读·测试 / `io.legado.app.beta`（独立安装，不覆盖正式版）
