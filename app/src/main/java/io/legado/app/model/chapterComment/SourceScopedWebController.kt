@@ -33,6 +33,10 @@ class SourceScopedWebController {
     private var sourceHeaders: Map<String, String> = emptyMap()
     private val initialDocumentGate = SourceScopedInitialDocumentGate()
     private var needClearHistory = true
+    /** First paint of loadDataWithBaseURL — used to avoid goBack into a broken data: entry. */
+    private var initialUrl: String? = null
+    private var initialHtml: String? = null
+    private var initialNetworkContext: SourceScopedNetworkContext? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     fun attach(webView: WebView) {
@@ -62,6 +66,9 @@ class SourceScopedWebController {
         authenticatedOrigin = networkContext.origin
         httpClient = newSourceScopedHttpClient(networkContext)
         sourceHeaders = LinkedHashMap(headers)
+        initialUrl = finalUrl
+        initialHtml = html
+        initialNetworkContext = networkContext
         needClearHistory = true
         headers.entries.firstOrNull { it.key.equals(AppConst.UA_NAME, true) }
             ?.value
@@ -84,12 +91,28 @@ class SourceScopedWebController {
         )
     }
 
-    /** @return true if the back event was consumed (history pop). */
+    /**
+     * @return true if the back event was consumed (history pop or root re-load).
+     *
+     * Going back into the first loadDataWithBaseURL entry often hits a data: URL that
+     * SOURCE_SCOPED OkHttp intercept cannot serve — reload the cached root HTML instead.
+     */
     fun goBackOrFalse(): Boolean {
         val view = webView ?: return false
         if (!view.canGoBack()) return false
         val list = view.copyBackForwardList()
         if (list.size <= 1) return false
+        val prev = list.getItemAtIndex(list.currentIndex - 1) ?: return false
+        val prevUrl = prev.originalUrl.orEmpty()
+        val rootUrl = initialUrl
+        val rootHtml = initialHtml
+        val rootCtx = initialNetworkContext
+        val backToRoot = prevUrl.startsWith("data:", ignoreCase = true) ||
+            (rootUrl != null && prevUrl == rootUrl && list.currentIndex == 1)
+        if (backToRoot && rootUrl != null && rootHtml != null && rootCtx != null) {
+            load(rootUrl, rootHtml, sourceHeaders, rootCtx)
+            return true
+        }
         view.goBack()
         return true
     }
@@ -105,6 +128,9 @@ class SourceScopedWebController {
         authenticatedOrigin = null
         httpClient = null
         sourceHeaders = emptyMap()
+        initialUrl = null
+        initialHtml = null
+        initialNetworkContext = null
     }
 
     private fun injectSourceScopedCsp(html: String): String {
@@ -156,6 +182,12 @@ class SourceScopedWebController {
             request: WebResourceRequest,
         ): WebResourceResponse? {
             val url = request.url.toString()
+            // History restore of loadDataWithBaseURL / blank — never send to OkHttp.
+            if (url.startsWith("data:", ignoreCase = true) ||
+                url.equals("about:blank", ignoreCase = true)
+            ) {
+                return super.shouldInterceptRequest(view, request)
+            }
             if (initialDocumentGate.consume(url, request.method, request.isForMainFrame)) {
                 return super.shouldInterceptRequest(view, request)
             }

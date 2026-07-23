@@ -13,7 +13,6 @@ import androidx.core.view.isVisible
 import io.legado.app.databinding.ViewChapterCommentPanelBinding
 import io.legado.app.help.webView.PooledWebView
 import io.legado.app.help.webView.WebViewPool
-import io.legado.app.model.chapterComment.ChapterCommentEvent
 import io.legado.app.model.chapterComment.ChapterCommentWebPage
 import io.legado.app.model.chapterComment.SourceScopedWebController
 import io.legado.app.utils.gone
@@ -23,8 +22,8 @@ import kotlin.math.roundToInt
 /**
  * In-reader chapter-comment shell (scheme B).
  *
- * Visual: top-rounded card, bottom flush to the screen, light elevation shadow.
- * Content: SOURCE_SCOPED WebView only — no browser chrome.
+ * Visual: top-rounded card, bottom flush, light elevation. No title / close chrome —
+ * dismiss via upper scrim or system back only.
  */
 class ChapterCommentPanel @JvmOverloads constructor(
     context: Context,
@@ -51,7 +50,6 @@ class ChapterCommentPanel @JvmOverloads constructor(
         gone()
         isClickable = true
         binding.commentScrim.setOnClickListener { requestClose() }
-        binding.btnCommentClose.setOnClickListener { requestClose() }
         binding.btnCommentRetry.setOnClickListener { onRetry?.invoke() }
         // Consume sheet touches so they do not fall through to ReadView.
         binding.commentSheet.isClickable = true
@@ -64,23 +62,20 @@ class ChapterCommentPanel @JvmOverloads constructor(
         }
     }
 
-    fun openLoading(title: String) {
+    fun openLoading() {
         closing = false
         if (isOpen) {
-            binding.tvCommentTitle.text = title
             showState(State.LOADING)
             return
         }
-        ensureOpenChrome(title)
+        ensureOpenChrome()
         showState(State.LOADING)
     }
 
     fun showPage(page: ChapterCommentWebPage) {
         if (closing) return
         if (!isOpen) {
-            ensureOpenChrome(page.action.title)
-        } else {
-            binding.tvCommentTitle.text = page.action.title
+            ensureOpenChrome()
         }
         ensureWebView()
         showState(State.CONTENT)
@@ -93,12 +88,10 @@ class ChapterCommentPanel @JvmOverloads constructor(
         )
     }
 
-    fun showError(message: String, title: String? = null) {
+    fun showError(message: String) {
         if (closing) return
         if (!isOpen) {
-            ensureOpenChrome(title ?: "评论")
-        } else if (title != null) {
-            binding.tvCommentTitle.text = title
+            ensureOpenChrome()
         }
         binding.tvCommentError.text = message
         showState(State.ERROR)
@@ -170,11 +163,10 @@ class ChapterCommentPanel @JvmOverloads constructor(
         onRequestClose?.invoke()
     }
 
-    private fun ensureOpenChrome(title: String) {
+    private fun ensureOpenChrome() {
         isOpen = true
         closing = false
         visible()
-        binding.tvCommentTitle.text = title
         val parentH = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
         applySheetHeight(parentH)
         binding.commentScrim.alpha = 0f
@@ -256,14 +248,5 @@ class ChapterCommentPanel @JvmOverloads constructor(
         private const val HEIGHT_RATIO = 0.78f
         private const val OPEN_MS = 220L
         private const val CLOSE_MS = 180L
-
-        fun defaultTitle(event: ChapterCommentEvent): String {
-            return when (event.scope) {
-                ChapterCommentEvent.SCOPE_SEGMENT -> "段评"
-                ChapterCommentEvent.SCOPE_PAGE -> "页热评"
-                ChapterCommentEvent.SCOPE_CHAPTER -> "本章说"
-                else -> "评论"
-            }
-        }
     }
 }

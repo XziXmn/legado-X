@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <merge xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     tools:parentTag="android.widget.FrameLayout">
 
@@ -13,8 +12,8 @@
         android:contentDescription="@string/close" />
 
     <!--
-      Bottom-flush sheet: top corners rounded via bg_chapter_comment_panel,
-      elevation paints a soft lift/shadow above the curved edge.
+      Bottom-flush sheet: top corners rounded, elevation for soft lift.
+      No chrome title / close button — dismiss via scrim or system back.
     -->
     <LinearLayout
         android:id="@+id/comment_sheet"
@@ -34,41 +33,9 @@
             android:layout_height="4dp"
             android:layout_gravity="center_horizontal"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:background="@drawable/bg_chapter_comment_handle"
             android:importantForAccessibility="no" />
-
-        <LinearLayout
-            android:id="@+id/comment_header"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingEnd="4dp">
-
-            <TextView
-                android:id="@+id/tv_comment_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/primaryText"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                tools:text="页热评" />
-
-            <ImageButton
-                android:id="@+id/btn_comment_close"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/close"
-                android:padding="12dp"
-                android:src="@drawable/ic_baseline_close"
-                app:tint="@color/primaryText" />
-        </LinearLayout>
 
         <FrameLayout
             android:layout_width="match_parent"

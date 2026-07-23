@@ -106,7 +106,6 @@ import io.legado.app.ui.replace.ReplaceRuleActivity
 import io.legado.app.ui.replace.edit.ReplaceEditActivity
 import io.legado.app.ui.widget.PopupAction
 import io.legado.app.ui.widget.dialog.PhotoDialog
-import io.legado.app.ui.book.read.comment.ChapterCommentPanel
 import io.legado.app.utils.ACache
 import io.legado.app.utils.Debounce
 import io.legado.app.utils.LogUtils
@@ -1392,8 +1391,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         val book = ReadBook.book ?: return
         val rule = source.getContentRule().chapterComment ?: return
         pendingChapterCommentEvent = event
-        val title = ChapterCommentPanel.defaultTitle(event)
-        panel.openLoading(title)
+        panel.openLoading()
         chapterCommentActionJob?.cancel()
         chapterCommentActionJob = lifecycleScope.launch {
             try {
@@ -1415,7 +1413,7 @@ class ReadBookActivity : BaseReadBookActivity(),
             } catch (error: Throwable) {
                 AppLog.put("打开章节评论失败", error)
                 if (panel.isOpen) {
-                    panel.showError("评论加载失败，请稍后重试", title)
+                    panel.showError("评论加载失败，请稍后重试")
                 } else {
                     toastOnUi("评论加载失败，请稍后重试")
                 }
