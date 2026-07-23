@@ -48,6 +48,8 @@ class SourceScopedWebController {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             webView.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
+        // Avoid white flash before themed HTML paints.
+        webView.setBackgroundColor(ChapterCommentReaderTheme.paperColor())
         webView.removeJavascriptInterface("basic")
         webView.removeJavascriptInterface("java")
         webView.removeJavascriptInterface("source")
@@ -73,7 +75,8 @@ class SourceScopedWebController {
         headers.entries.firstOrNull { it.key.equals(AppConst.UA_NAME, true) }
             ?.value
             ?.let { view.settings.userAgentString = it }
-        val body = injectSourceScopedCsp(html)
+        view.setBackgroundColor(ChapterCommentReaderTheme.paperColor())
+        val body = injectReaderTheme(injectSourceScopedCsp(html))
         initialDocumentGate.arm(finalUrl)
         view.loadDataWithBaseURL(finalUrl, body, "text/html", "utf-8", finalUrl)
     }
@@ -139,11 +142,26 @@ class SourceScopedWebController {
             "style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; " +
             "font-src 'self' https: data:; media-src 'self' https:; connect-src 'self'; " +
             "frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'\">"
+        return insertIntoHead(html, policy)
+    }
+
+    /**
+     * Paint hub review HTML with the active reader theme so the in-reader panel blends.
+     * Colors come from [ChapterCommentReaderTheme] (same surface as the page behind the sheet).
+     */
+    private fun injectReaderTheme(html: String): String {
+        if (html.contains("id=\"legado-reader-theme\"", ignoreCase = true)) {
+            return html
+        }
+        return insertIntoHead(html, ChapterCommentReaderTheme.styleTag())
+    }
+
+    private fun insertIntoHead(html: String, snippet: String): String {
         val head = Regex("<head[^>]*>", RegexOption.IGNORE_CASE).find(html)
         return if (head == null) {
-            policy + html
+            snippet + html
         } else {
-            html.substring(0, head.range.last + 1) + policy + html.substring(head.range.last + 1)
+            html.substring(0, head.range.last + 1) + snippet + html.substring(head.range.last + 1)
         }
     }
 
@@ -154,6 +172,12 @@ class SourceScopedWebController {
                 webView?.clearHistory()
             }
             super.onPageStarted(view, url, favicon)
+        }
+
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            // Re-apply after navigations that may skip the HTML rewriter.
+            view?.let { ChapterCommentReaderTheme.applyCssVariables(it) }
         }
 
         override fun shouldOverrideUrlLoading(
@@ -270,7 +294,9 @@ class SourceScopedWebController {
             require(bytes.size <= MAX_RESOURCE_BYTES) { "Source-scoped resource is too large" }
             if (!headOnly && mimeType.equals("text/html", true)) {
                 val bodyCharset = Charset.forName(charset)
-                bytes = injectSourceScopedCsp(bytes.toString(bodyCharset)).toByteArray(bodyCharset)
+                bytes = injectReaderTheme(
+                    injectSourceScopedCsp(bytes.toString(bodyCharset)),
+                ).toByteArray(bodyCharset)
             }
             val responseHeaders = linkedMapOf<String, String>()
             headers.names().forEach { name ->

@@ -4,6 +4,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -13,6 +14,7 @@ import androidx.core.view.isVisible
 import io.legado.app.databinding.ViewChapterCommentPanelBinding
 import io.legado.app.help.webView.PooledWebView
 import io.legado.app.help.webView.WebViewPool
+import io.legado.app.model.chapterComment.ChapterCommentReaderTheme
 import io.legado.app.model.chapterComment.ChapterCommentWebPage
 import io.legado.app.model.chapterComment.SourceScopedWebController
 import io.legado.app.utils.gone
@@ -167,10 +169,25 @@ class ChapterCommentPanel @JvmOverloads constructor(
         isOpen = true
         closing = false
         visible()
+        applySheetSurfaceFromReaderTheme()
         val parentH = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
         applySheetHeight(parentH)
         binding.commentScrim.alpha = 0f
         animateOpen()
+    }
+
+    /** Match the sheet surface to the current reading page background. */
+    private fun applySheetSurfaceFromReaderTheme() {
+        val radius = 16f * resources.displayMetrics.density
+        val paper = ChapterCommentReaderTheme.paperColor()
+        binding.commentSheet.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(paper)
+            cornerRadii = floatArrayOf(
+                radius, radius, radius, radius,
+                0f, 0f, 0f, 0f,
+            )
+        }
     }
 
     private fun animateOpen() {
