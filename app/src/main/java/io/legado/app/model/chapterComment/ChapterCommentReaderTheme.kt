@@ -3,11 +3,13 @@ package io.legado.app.model.chapterComment
 import android.graphics.Color
 import android.webkit.WebView
 import io.legado.app.help.config.ReadBookConfig
+import io.legado.app.lib.theme.ThemeStore
 import io.legado.app.utils.ColorUtils
 
 /**
- * Reader-surface colors for the in-reader comment panel (native sheet + SOURCE_SCOPED HTML).
- * Single source so Web inject and native chrome never diverge.
+ * Colors for the in-reader comment panel (native sheet + SOURCE_SCOPED HTML).
+ * Paper/ink follow the reading page; interactive accent follows App 主题强调色
+ * ([ThemeStore.accentColor]), not reading-style textAccentColor.
  */
 internal object ChapterCommentReaderTheme {
 
@@ -48,7 +50,8 @@ internal object ChapterCommentReaderTheme {
     fun tokens(): Tokens {
         val paper = paperColor()
         val ink = ColorUtils.stripAlpha(ReadBookConfig.textColor)
-        val blue = ColorUtils.stripAlpha(ReadBookConfig.textAccentColor)
+        // App 主题设置 → 强调色（与设置页色块一致），避免误用阅读样式默认红。
+        val blue = ColorUtils.stripAlpha(ThemeStore.accentColor())
         val lightPaper = ColorUtils.isColorLight(paper)
         val green = if (lightPaper) 0xFF39765E.toInt() else 0xFF7BC9A6.toInt()
         val rose = if (lightPaper) 0xFFA15462.toInt() else 0xFFE08A97.toInt()
