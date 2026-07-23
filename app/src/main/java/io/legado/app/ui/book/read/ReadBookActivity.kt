@@ -106,7 +106,7 @@ import io.legado.app.ui.replace.ReplaceRuleActivity
 import io.legado.app.ui.replace.edit.ReplaceEditActivity
 import io.legado.app.ui.widget.PopupAction
 import io.legado.app.ui.widget.dialog.PhotoDialog
-import io.legado.app.ui.widget.dialog.BottomWebViewDialog
+import io.legado.app.ui.book.read.comment.ChapterCommentPanel
 import io.legado.app.utils.ACache
 import io.legado.app.utils.Debounce
 import io.legado.app.utils.LogUtils
@@ -227,6 +227,7 @@ class ReadBookActivity : BaseReadBookActivity(),
     private var backupJob: Job? = null
     private var chapterCommentActionJob: Job? = null
     private val chapterCommentActionExecutor = ChapterCommentActionExecutor()
+    private var pendingChapterCommentEvent: ChapterCommentEvent? = null
     private var tts: TTS? = null
     val textActionMenu: TextActionMenu by lazy {
         TextActionMenu(this, this)
@@ -237,8 +238,7 @@ class ReadBookActivity : BaseReadBookActivity(),
     override val isInitFinish: Boolean get() = viewModel.isInitFinish
     override val canOpenChapterComment: Boolean
         get() = chapterCommentActionJob?.isActive != true &&
-                supportFragmentManager.findFragmentByTag(CHAPTER_COMMENT_DIALOG_TAG)
-                    ?.let { it.isAdded && !it.isRemoving } != true
+                !binding.chapterCommentPanel.isBusy
     override val isScroll: Boolean get() = binding.readView.isScroll
     private val isAutoPage get() = binding.readView.isAutoPage
     override var isShowingSearchResult = false
@@ -285,7 +285,11 @@ class ReadBookActivity : BaseReadBookActivity(),
         window.setBackgroundDrawable(null)
         upScreenTimeOut()
         ReadBook.register(this)
+        setupChapterCommentPanel()
         onBackPressedDispatcher.addCallback(this) {
+            if (binding.chapterCommentPanel.onBackPressed()) {
+                return@addCallback
+            }
             if (isShowingSearchResult) {
                 exitSearchMenu()
                 restoreLastBookProcess()
@@ -310,6 +314,22 @@ class ReadBookActivity : BaseReadBookActivity(),
             }
             finish()
         }
+    }
+
+    private fun setupChapterCommentPanel() {
+        binding.chapterCommentPanel.onRequestClose = {
+            closeChapterCommentPanel()
+        }
+        binding.chapterCommentPanel.onRetry = {
+            pendingChapterCommentEvent?.let { openChapterComment(it) }
+        }
+    }
+
+    private fun closeChapterCommentPanel() {
+        chapterCommentActionJob?.cancel()
+        chapterCommentActionJob = null
+        pendingChapterCommentEvent = null
+        binding.chapterCommentPanel.close(animated = true)
     }
 
     override fun onPostCreate(savedInstanceState: Bundle?) {
@@ -368,6 +388,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         upSystemUiVisibility()
         registerReceiver(timeBatteryReceiver, timeBatteryReceiver.filter)
         binding.readView.upTime()
+        binding.chapterCommentPanel.resumeWeb()
         screenOffTimerStart()
         // 网络监听，当从无网切换到网络环境时同步进度（注意注册的同时就会收到监听，因此界面激活时无需重复执行同步操作）
         networkChangedListener.register()
@@ -382,6 +403,7 @@ class ReadBookActivity : BaseReadBookActivity(),
     override fun onPause() {
         super.onPause()
         autoPageStop()
+        binding.chapterCommentPanel.pauseWeb()
         backupJob?.cancel()
         ReadBook.saveRead()
         ReadBook.cancelPreDownloadTask()
@@ -1362,10 +1384,17 @@ class ReadBookActivity : BaseReadBookActivity(),
     }
 
     override fun openChapterComment(event: ChapterCommentEvent) {
-        if (!canOpenChapterComment) return
+        // Allow retry while the panel is already open on the error state.
+        val panel = binding.chapterCommentPanel
+        val allowRetry = panel.isOpen && chapterCommentActionJob?.isActive != true
+        if (!canOpenChapterComment && !allowRetry) return
         val source = ReadBook.bookSource ?: return
         val book = ReadBook.book ?: return
         val rule = source.getContentRule().chapterComment ?: return
+        pendingChapterCommentEvent = event
+        val title = ChapterCommentPanel.defaultTitle(event)
+        panel.openLoading(title)
+        chapterCommentActionJob?.cancel()
         chapterCommentActionJob = lifecycleScope.launch {
             try {
                 val chapter = withContext(IO) {
@@ -1379,22 +1408,17 @@ class ReadBookActivity : BaseReadBookActivity(),
                     event = event,
                 )
                 if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@launch
-                if (supportFragmentManager.findFragmentByTag(CHAPTER_COMMENT_DIALOG_TAG) != null) {
-                    return@launch
-                }
-                BottomWebViewDialog(
-                    sourceKey = source.bookSourceUrl,
-                    bookType = BookType.text,
-                    url = page.finalUrl,
-                    html = page.html,
-                    securityMode = BottomWebViewDialog.SecurityMode.SOURCE_SCOPED,
-                    sourceScopedNetworkContext = page.networkContext,
-                ).show(supportFragmentManager, CHAPTER_COMMENT_DIALOG_TAG)
+                if (!panel.isOpen) return@launch
+                panel.showPage(page)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 AppLog.put("打开章节评论失败", error)
-                toastOnUi("评论加载失败，请稍后重试")
+                if (panel.isOpen) {
+                    panel.showError("评论加载失败，请稍后重试", title)
+                } else {
+                    toastOnUi("评论加载失败，请稍后重试")
+                }
             } finally {
                 chapterCommentActionJob = null
             }
@@ -1783,6 +1807,10 @@ class ReadBookActivity : BaseReadBookActivity(),
         tts?.clearTts()
         textActionMenu.dismiss()
         popupAction.dismiss()
+        chapterCommentActionJob?.cancel()
+        chapterCommentActionJob = null
+        pendingChapterCommentEvent = null
+        binding.chapterCommentPanel.release()
         binding.readView.onDestroy()
         ReadBook.unregister(this)
         handler.removeCallbacksAndMessages(null) // 清理Handler消息
@@ -1912,7 +1940,6 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     companion object {
         const val RESULT_DELETED = 100
-        private const val CHAPTER_COMMENT_DIALOG_TAG = "chapterCommentSourceWebView"
     }
 
 }

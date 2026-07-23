@@ -19,6 +19,8 @@ data class ChapterCommentWebPage(
     val finalUrl: String,
     val html: String,
     val networkContext: SourceScopedNetworkContext,
+    /** Book-source request headers used for the first-page fetch (and subsequent scoped loads). */
+    val headers: Map<String, String> = emptyMap(),
 )
 
 /** Executes a source-owned action and fetches its first page exactly once. */
@@ -70,7 +72,13 @@ class ChapterCommentActionExecutor {
         val networkContext = SourceScopedRequestPolicy.pinActionUrl(initialUrl, summaryOrigin)
         val sourceHeaders = LinkedHashMap(analyzeUrl.headerMap)
         val page = fetchHtml(sourceHeaders, initialUrl, networkContext)
-        ChapterCommentWebPage(action, page.first, page.second, networkContext)
+        ChapterCommentWebPage(
+            action = action,
+            finalUrl = page.first,
+            html = page.second,
+            networkContext = networkContext,
+            headers = sourceHeaders,
+        )
     }
 
     private fun normalizeScript(rule: String): String {

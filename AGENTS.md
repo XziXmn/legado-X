@@ -15,3 +15,10 @@
 - Never commit private keystores or their passwords.
 - Keep generated APKs and local build output out of Git.
 - Push only to `origin`. Never push to `upstream` unless the user explicitly requests that exact action.
+
+## Release Channel
+
+- **Default = beta (测试版).** Feature work, UX experiments (e.g. in-reader comment panel), and routine fixes ship as `io.legado.app.beta` / tag `beta` unless the user **explicitly** asks for a formal release.
+- CI formal path is triggered only when `app/src/main/assets/updateLog.md` changes in the pushed commit. Do **not** edit `updateLog.md` for beta work.
+- **Formal release** (`io.legado.app.release` + version tag): only when the user clearly requests 正式发版 / 正式推送 / formal ship. Then update user-facing `updateLog.md` and push.
+- Never treat “push / 构建 / 发版” alone as formal; require explicit formal intent.

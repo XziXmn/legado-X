@@ -31,6 +31,13 @@
         android:src="@drawable/ic_cursor_right"
         android:visibility="invisible" />
 
+    <!-- In-reader comment panel (scheme B); sits under menus, above the page. -->
+    <io.legado.app.ui.book.read.comment.ChapterCommentPanel
+        android:id="@+id/chapter_comment_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
     <io.legado.app.ui.book.read.ReadMenu
         android:id="@+id/read_menu"
         android:layout_width="match_parent"
