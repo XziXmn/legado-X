@@ -28,7 +28,7 @@
 
 ## 友情链接
 
-- [LINUX DO Credit](https://github.com/linux-do/credit) — LINUX DO 社区积分相关项目
+- [LINUX DO](https://linux.do/) — LINUX DO 社区
 
 ## 许可
 
