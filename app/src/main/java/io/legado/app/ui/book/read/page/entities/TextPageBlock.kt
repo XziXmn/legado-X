@@ -2,8 +2,8 @@ package io.legado.app.ui.book.read.page.entities
 
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.text.TextUtils
 import android.text.TextPaint
+import android.text.TextUtils
 import androidx.core.graphics.ColorUtils
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.model.chapterComment.ChapterCommentParser
@@ -11,6 +11,7 @@ import io.legado.app.model.chapterComment.ChapterCommentSummary
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.utils.dpToPx
 import java.text.BreakIterator
+import kotlin.math.floor
 import kotlin.math.max
 
 sealed interface TextPageBlock {
@@ -47,11 +48,7 @@ data class ChapterCommentPageBlock(
             backgroundPaint,
         )
 
-        val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = textColor
-            textSize = titleTextSize()
-            typeface = ChapterProvider.typeface
-        }
+        val labelPaint = newTitlePaint(textColor)
         val countPaint = Paint(labelPaint).apply {
             color = ColorUtils.setAlphaComponent(textColor, 150)
             textSize = labelPaint.textSize * 0.82f
@@ -126,30 +123,27 @@ data class ChapterCommentPageBlock(
         }
 
         val previews = previewItems(summary)
-        if (previews.isNotEmpty()) {
-            val previewPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = ColorUtils.setAlphaComponent(textColor, 175)
-                textSize = previewTextSize()
-                typeface = ChapterProvider.typeface
-            }
-            val maxWidth = max(0f, contentRight - contentLeft)
-            val firstBaseline = titleBaseline + TITLE_PREVIEW_GAP - previewPaint.ascent()
-            val lineHeight = (previewPaint.descent() - previewPaint.ascent()) * PREVIEW_LINE_SPACING
-            val titleHeight = labelPaint.descent() - labelPaint.ascent()
-            val availablePreviewHeight = max(
-                0f,
-                height - TOP_PADDING - titleHeight - TITLE_PREVIEW_GAP - BOTTOM_PADDING,
-            )
-            val maxLines = max(1, (availablePreviewHeight / lineHeight).toInt())
-            val lines = fitPreviewLines(
-                layoutPreviewLines(previews, previewPaint, maxWidth),
-                maxLines,
-                previewPaint,
-                maxWidth,
-            )
-            lines.forEachIndexed { index, line ->
-                canvas.drawText(line, contentLeft, firstBaseline + index * lineHeight, previewPaint)
-            }
+        if (previews.isEmpty()) return
+
+        // Must match preferredHeight(): same typeface/size/width → same wrap lines.
+        val previewPaint = newPreviewPaint(ColorUtils.setAlphaComponent(textColor, 175))
+        val maxWidth = contentMaxWidth()
+        val firstBaseline = titleBaseline + TITLE_PREVIEW_GAP - previewPaint.ascent()
+        val lineHeight = previewLineHeight(previewPaint)
+        val titleHeight = labelPaint.descent() - labelPaint.ascent()
+        val availablePreviewHeight = max(
+            0f,
+            height - TOP_PADDING - titleHeight - TITLE_PREVIEW_GAP - BOTTOM_PADDING,
+        )
+        val maxLines = max(1, floor(availablePreviewHeight / lineHeight).toInt())
+        val lines = fitPreviewLines(
+            layoutPreviewLines(previews, previewPaint, maxWidth),
+            maxLines,
+            previewPaint,
+            maxWidth,
+        )
+        lines.forEachIndexed { index, line ->
+            canvas.drawText(line, contentLeft, firstBaseline + index * lineHeight, previewPaint)
         }
     }
 
@@ -188,19 +182,37 @@ data class ChapterCommentPageBlock(
         fun preferredHeight(summary: ChapterCommentSummary): Float {
             val previews = previewItems(summary)
             if (previews.isEmpty()) return DEFAULT_HEIGHT
-            val titlePaint = TextPaint().apply { textSize = titleTextSize() }
-            val previewPaint = TextPaint().apply { textSize = previewTextSize() }
+            // Same metrics as draw(): typeface + size + content width.
+            val titlePaint = newTitlePaint()
+            val previewPaint = newPreviewPaint()
             val titleHeight = titlePaint.descent() - titlePaint.ascent()
-            val previewLineHeight =
-                (previewPaint.descent() - previewPaint.ascent()) * PREVIEW_LINE_SPACING
+            val lineHeight = previewLineHeight(previewPaint)
             val maxWidth = contentMaxWidth()
-            val lineCount = max(
-                1,
-                layoutPreviewLines(previews, previewPaint, maxWidth).size,
-            )
+            val wrapped = layoutPreviewLines(previews, previewPaint, maxWidth)
+            val lineCount = max(1, wrapped.size)
             val natural = TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP +
-                    previewLineHeight * lineCount + BOTTOM_PADDING
+                    lineHeight * lineCount + BOTTOM_PADDING
             return natural.coerceIn(PREVIEW_MIN_HEIGHT, maxBlockHeight())
+        }
+
+        private fun newTitlePaint(color: Int = ReadBookConfig.textColor): TextPaint {
+            return TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                textSize = titleTextSize()
+                typeface = ChapterProvider.typeface
+            }
+        }
+
+        private fun newPreviewPaint(color: Int = ReadBookConfig.textColor): TextPaint {
+            return TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                textSize = previewTextSize()
+                typeface = ChapterProvider.typeface
+            }
+        }
+
+        private fun previewLineHeight(paint: TextPaint): Float {
+            return (paint.descent() - paint.ascent()) * PREVIEW_LINE_SPACING
         }
 
         private fun maxBlockHeight(): Float {
@@ -209,11 +221,12 @@ data class ChapterCommentPageBlock(
         }
 
         private fun contentMaxWidth(): Float {
-            return max(
-                0f,
-                ChapterProvider.visibleRight - ChapterProvider.paddingLeft -
-                        HORIZONTAL_PADDING * 2,
-            )
+            val fromEdges = ChapterProvider.visibleRight - ChapterProvider.paddingLeft -
+                    HORIZONTAL_PADDING * 2
+            if (fromEdges > 1f) return fromEdges
+            // Fallback when edge fields are not ready yet during layout.
+            val fromVisible = ChapterProvider.visibleWidth - HORIZONTAL_PADDING * 2
+            return max(0f, fromVisible.toFloat())
         }
 
         private fun previewItems(summary: ChapterCommentSummary): List<String> {
@@ -250,23 +263,33 @@ data class ChapterCommentPageBlock(
             var guard = 0
             while (remaining.isNotEmpty() && guard++ < MAX_WRAP_LINES) {
                 val measuredLength = paint.breakText(remaining, true, maxWidth, null)
-                val cut = safeCharacterBoundary(remaining, measuredLength)
+                var cut = safeCharacterBoundary(remaining, measuredLength)
                 if (cut <= 0) {
+                    // Force progress so a zero-width break cannot stall the loop.
+                    cut = remaining.offsetByCodePoints(0, 1).coerceAtMost(remaining.length)
+                    val piece = remaining.substring(0, cut)
                     val fallback = TextUtils.ellipsize(
-                        remaining,
+                        piece,
                         paint,
                         maxWidth,
                         TextUtils.TruncateAt.END,
                     ).toString()
                     if (fallback.isNotEmpty()) lines.add(fallback)
-                    break
+                    remaining = remaining.substring(cut).trimStart()
+                    continue
                 }
                 if (cut >= remaining.length) {
                     lines.add(remaining)
                     break
                 }
                 val line = remaining.substring(0, cut).trimEnd()
-                if (line.isNotEmpty()) lines.add(line)
+                if (line.isNotEmpty()) {
+                    lines.add(line)
+                } else {
+                    // Whitespace-only slice: skip without stalling.
+                    remaining = remaining.substring(cut).trimStart()
+                    continue
+                }
                 remaining = remaining.substring(cut).trimStart()
             }
             return lines
