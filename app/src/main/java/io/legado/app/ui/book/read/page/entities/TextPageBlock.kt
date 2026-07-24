@@ -135,18 +135,18 @@ data class ChapterCommentPageBlock(
             val maxWidth = max(0f, contentRight - contentLeft)
             val firstBaseline = titleBaseline + TITLE_PREVIEW_GAP - previewPaint.ascent()
             val lineHeight = (previewPaint.descent() - previewPaint.ascent()) * PREVIEW_LINE_SPACING
-            val lines = if (previews.size == 1) {
-                previewLines(previews.single(), previewPaint, maxWidth)
-            } else {
-                previews.map { preview ->
-                    TextUtils.ellipsize(
-                        preview,
-                        previewPaint,
-                        maxWidth,
-                        TextUtils.TruncateAt.END,
-                    ).toString()
-                }.filter(String::isNotEmpty)
-            }
+            val titleHeight = labelPaint.descent() - labelPaint.ascent()
+            val availablePreviewHeight = max(
+                0f,
+                height - TOP_PADDING - titleHeight - TITLE_PREVIEW_GAP - BOTTOM_PADDING,
+            )
+            val maxLines = max(1, (availablePreviewHeight / lineHeight).toInt())
+            val lines = fitPreviewLines(
+                layoutPreviewLines(previews, previewPaint, maxWidth),
+                maxLines,
+                previewPaint,
+                maxWidth,
+            )
             lines.forEachIndexed { index, line ->
                 canvas.drawText(line, contentLeft, firstBaseline + index * lineHeight, previewPaint)
             }
@@ -165,7 +165,6 @@ data class ChapterCommentPageBlock(
         val TOP_GAP = 12.dpToPx().toFloat()
         val END_PADDING = 20.dpToPx().toFloat()
         private val PREVIEW_MIN_HEIGHT = 84.dpToPx().toFloat()
-        private val PREVIEW_MAX_HEIGHT = 128.dpToPx().toFloat()
         private val MIN_TITLE_TEXT_SIZE = 13.dpToPx().toFloat()
         private val MAX_TITLE_TEXT_SIZE = 18.dpToPx().toFloat()
         private val MIN_PREVIEW_TEXT_SIZE = 11.dpToPx().toFloat()
@@ -182,19 +181,39 @@ data class ChapterCommentPageBlock(
         private val CORNER_RADIUS = 7.dpToPx().toFloat()
         private val BADGE_CORNER_RADIUS = 4.dpToPx().toFloat()
         private const val PREVIEW_LINE_SPACING = 1.12f
+        /** Hard safety against pathological wrap loops (512-char previews). */
+        private const val MAX_WRAP_LINES = 256
         private val WHITESPACE_REGEX = Regex("\\s+")
 
         fun preferredHeight(summary: ChapterCommentSummary): Float {
             val previews = previewItems(summary)
             if (previews.isEmpty()) return DEFAULT_HEIGHT
-            val titlePaint = Paint().apply { textSize = titleTextSize() }
-            val previewPaint = Paint().apply { textSize = previewTextSize() }
+            val titlePaint = TextPaint().apply { textSize = titleTextSize() }
+            val previewPaint = TextPaint().apply { textSize = previewTextSize() }
             val titleHeight = titlePaint.descent() - titlePaint.ascent()
-            val previewLineHeight = (previewPaint.descent() - previewPaint.ascent()) * PREVIEW_LINE_SPACING
-            val previewLineCount = if (previews.size == 1) 2 else previews.size
-            return (TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP +
-                    previewLineHeight * previewLineCount + BOTTOM_PADDING)
-                .coerceIn(PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT)
+            val previewLineHeight =
+                (previewPaint.descent() - previewPaint.ascent()) * PREVIEW_LINE_SPACING
+            val maxWidth = contentMaxWidth()
+            val lineCount = max(
+                1,
+                layoutPreviewLines(previews, previewPaint, maxWidth).size,
+            )
+            val natural = TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP +
+                    previewLineHeight * lineCount + BOTTOM_PADDING
+            return natural.coerceIn(PREVIEW_MIN_HEIGHT, maxBlockHeight())
+        }
+
+        private fun maxBlockHeight(): Float {
+            val pageBudget = ChapterProvider.visibleHeight - TOP_GAP - END_PADDING
+            return max(PREVIEW_MIN_HEIGHT, pageBudget.toFloat())
+        }
+
+        private fun contentMaxWidth(): Float {
+            return max(
+                0f,
+                ChapterProvider.visibleRight - ChapterProvider.paddingLeft -
+                        HORIZONTAL_PADDING * 2,
+            )
         }
 
         private fun previewItems(summary: ChapterCommentSummary): List<String> {
@@ -211,25 +230,79 @@ data class ChapterCommentPageBlock(
         private fun previewTextSize(): Float = (ChapterProvider.contentPaint.textSize * 0.62f)
             .coerceIn(MIN_PREVIEW_TEXT_SIZE, MAX_PREVIEW_TEXT_SIZE)
 
-        private fun previewLines(text: String, paint: TextPaint, maxWidth: Float): List<String> {
+        /**
+         * Wrap every preview fully (no 2-line / 1-line ellipsize cap).
+         * Author notes and chapter-comment snippets share this path.
+         */
+        private fun layoutPreviewLines(
+            previews: List<String>,
+            paint: TextPaint,
+            maxWidth: Float,
+        ): List<String> {
+            if (maxWidth <= 0f) return emptyList()
+            return previews.flatMap { wrapText(it, paint, maxWidth) }
+        }
+
+        private fun wrapText(text: String, paint: TextPaint, maxWidth: Float): List<String> {
             if (text.isEmpty() || maxWidth <= 0f) return emptyList()
-            val measuredLength = paint.breakText(text, true, maxWidth, null)
-            val firstLength = safeCharacterBoundary(text, measuredLength)
-            if (firstLength <= 0) {
+            val lines = ArrayList<String>()
+            var remaining = text
+            var guard = 0
+            while (remaining.isNotEmpty() && guard++ < MAX_WRAP_LINES) {
+                val measuredLength = paint.breakText(remaining, true, maxWidth, null)
+                val cut = safeCharacterBoundary(remaining, measuredLength)
+                if (cut <= 0) {
+                    val fallback = TextUtils.ellipsize(
+                        remaining,
+                        paint,
+                        maxWidth,
+                        TextUtils.TruncateAt.END,
+                    ).toString()
+                    if (fallback.isNotEmpty()) lines.add(fallback)
+                    break
+                }
+                if (cut >= remaining.length) {
+                    lines.add(remaining)
+                    break
+                }
+                val line = remaining.substring(0, cut).trimEnd()
+                if (line.isNotEmpty()) lines.add(line)
+                remaining = remaining.substring(cut).trimStart()
+            }
+            return lines
+        }
+
+        /**
+         * Prefer full text; only ellipsize when content exceeds the allocated block
+         * (typically a full reading page after [maxBlockHeight] clamping).
+         */
+        private fun fitPreviewLines(
+            lines: List<String>,
+            maxLines: Int,
+            paint: TextPaint,
+            maxWidth: Float,
+        ): List<String> {
+            if (lines.isEmpty() || maxLines <= 0) return emptyList()
+            if (lines.size <= maxLines) return lines
+            if (maxLines == 1) {
                 return listOf(
-                    TextUtils.ellipsize(text, paint, maxWidth, TextUtils.TruncateAt.END).toString()
+                    TextUtils.ellipsize(
+                        lines.joinToString(""),
+                        paint,
+                        maxWidth,
+                        TextUtils.TruncateAt.END,
+                    ).toString(),
                 ).filter(String::isNotEmpty)
             }
-            if (firstLength >= text.length) return listOf(text)
-            val first = text.substring(0, firstLength).trimEnd()
-            val remaining = text.substring(firstLength).trimStart()
-            val second = TextUtils.ellipsize(
-                remaining,
+            val head = lines.take(maxLines - 1)
+            val rest = lines.drop(maxLines - 1).joinToString("")
+            val last = TextUtils.ellipsize(
+                rest,
                 paint,
                 maxWidth,
                 TextUtils.TruncateAt.END,
             ).toString()
-            return listOf(first, second).filter(String::isNotEmpty)
+            return (head + last).filter(String::isNotEmpty)
         }
 
         private fun safeCharacterBoundary(text: String, measuredLength: Int): Int {
