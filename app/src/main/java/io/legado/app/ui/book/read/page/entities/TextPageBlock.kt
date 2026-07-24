@@ -13,7 +13,6 @@ import io.legado.app.model.chapterComment.ChapterCommentParser
 import io.legado.app.model.chapterComment.ChapterCommentSummary
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.utils.dpToPx
-import kotlin.math.floor
 import kotlin.math.max
 
 sealed interface TextPageBlock {
@@ -27,16 +26,17 @@ sealed interface TextPageBlock {
 /**
  * Chapter-end author / chapter-comment card.
  *
- * Preview lines are laid out **once** at construction ([create] / [measure]) so
- * height and draw always share the same wrap result. Re-wrapping in [draw] with
- * a different paint/width previously produced a short card + ellipsis for long
- * single-preview author notes.
+ * Preview body is a single [StaticLayout] built once from the full preview
+ * strings. Height comes from [StaticLayout.getHeight] — no secondary
+ * ellipsize / line-budget pass that previously cut short author notes.
  */
 data class ChapterCommentPageBlock(
     val summary: ChapterCommentSummary,
     override val top: Float,
     override val height: Float,
-    private val previewLines: List<String>,
+    /** Full preview text drawn via StaticLayout (may be empty). */
+    private val previewText: String,
+    private val previewLayoutWidth: Int,
 ) : TextPageBlock {
 
     val isInteractive: Boolean
@@ -44,8 +44,7 @@ data class ChapterCommentPageBlock(
 
     override fun draw(canvas: Canvas) {
         val left = ChapterProvider.paddingLeft.toFloat()
-        // Match body text column (visibleWidth), not full-screen visibleRight.
-        val right = left + ChapterProvider.visibleWidth
+        val right = left + ChapterProvider.visibleWidth.toFloat().coerceAtLeast(1f)
         val textColor = ReadBookConfig.textColor
         val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ColorUtils.setAlphaComponent(textColor, 18)
@@ -134,20 +133,32 @@ data class ChapterCommentPageBlock(
             canvas.drawText(">", contentRight, titleBaseline, countPaint)
         }
 
-        if (previewLines.isEmpty()) return
+        if (previewText.isEmpty() || previewLayoutWidth <= 0) return
         val previewPaint = newPreviewPaint(ColorUtils.setAlphaComponent(textColor, 175))
-        val firstBaseline = titleBaseline + TITLE_PREVIEW_GAP - previewPaint.ascent()
-        val lineHeight = previewLineHeight(previewPaint)
-        previewLines.forEachIndexed { index, line ->
-            canvas.drawText(line, contentLeft, firstBaseline + index * lineHeight, previewPaint)
-        }
+        val titleHeight = labelPaint.descent() - labelPaint.ascent()
+        val previewTop = top + TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP
+        val maxPreviewHeight = max(
+            0f,
+            height - TOP_PADDING - titleHeight - TITLE_PREVIEW_GAP - BOTTOM_PADDING,
+        )
+        // Full text; only apply END ellipsize when the page budget cannot hold it.
+        val layout = buildStaticLayout(
+            text = previewText,
+            paint = previewPaint,
+            widthPx = previewLayoutWidth,
+            maxHeight = maxPreviewHeight,
+        )
+        canvas.save()
+        canvas.translate(contentLeft, previewTop)
+        layout.draw(canvas)
+        canvas.restore()
     }
 
     override fun contains(x: Float, y: Float, relativeOffset: Float): Boolean {
         if (!isInteractive) return false
         val localY = y - relativeOffset
         val left = ChapterProvider.paddingLeft.toFloat()
-        val right = left + ChapterProvider.visibleWidth
+        val right = left + ChapterProvider.visibleWidth.toFloat().coerceAtLeast(1f)
         return x in left..right && localY in top..bottom
     }
 
@@ -171,41 +182,50 @@ data class ChapterCommentPageBlock(
         private val ARROW_RESERVED_WIDTH = 14.dpToPx().toFloat()
         private val CORNER_RADIUS = 7.dpToPx().toFloat()
         private val BADGE_CORNER_RADIUS = 4.dpToPx().toFloat()
-        private const val PREVIEW_LINE_SPACING = 1.12f
+        /** Fallback content width when ChapterProvider has not been sized yet. */
+        private val FALLBACK_CONTENT_WIDTH = 300.dpToPx()
         private val WHITESPACE_REGEX = Regex("[ \\t\\x0B\\f\\r]+")
 
         private data class MeasuredPreview(
-            val lines: List<String>,
+            val text: String,
+            val widthPx: Int,
             val height: Float,
         )
 
         fun create(summary: ChapterCommentSummary, top: Float): ChapterCommentPageBlock {
             val measured = measure(summary)
-            return ChapterCommentPageBlock(summary, top, measured.height, measured.lines)
+            return ChapterCommentPageBlock(
+                summary = summary,
+                top = top,
+                height = measured.height,
+                previewText = measured.text,
+                previewLayoutWidth = measured.widthPx,
+            )
         }
 
         fun preferredHeight(summary: ChapterCommentSummary): Float = measure(summary).height
 
         private fun measure(summary: ChapterCommentSummary): MeasuredPreview {
-            val previews = previewItems(summary)
-            if (previews.isEmpty()) {
-                return MeasuredPreview(emptyList(), DEFAULT_HEIGHT)
+            val text = joinPreviews(previewItems(summary))
+            if (text.isEmpty()) {
+                return MeasuredPreview("", 0, DEFAULT_HEIGHT)
             }
             val titlePaint = newTitlePaint()
             val previewPaint = newPreviewPaint()
             val titleHeight = titlePaint.descent() - titlePaint.ascent()
-            val lineHeight = previewLineHeight(previewPaint)
-            val maxWidth = contentMaxWidth()
-            val fullLines = layoutPreviewLines(previews, previewPaint, maxWidth)
-            val lineCount = max(1, fullLines.size)
+            val widthPx = contentMaxWidthPx()
+            val fullLayout = buildStaticLayout(
+                text = text,
+                paint = previewPaint,
+                widthPx = widthPx,
+                maxHeight = Float.POSITIVE_INFINITY,
+            )
             val natural = TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP +
-                    lineHeight * lineCount + BOTTOM_PADDING
-            val height = natural.coerceIn(PREVIEW_MIN_HEIGHT, maxBlockHeight())
-            val chrome = TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP + BOTTOM_PADDING
-            val available = max(0f, height - chrome)
-            val maxLines = max(1, floor(available / lineHeight).toInt())
-            val lines = fitPreviewLines(fullLines, maxLines, previewPaint, maxWidth)
-            return MeasuredPreview(lines, height)
+                    fullLayout.height + BOTTOM_PADDING
+            val height = natural
+                .coerceAtLeast(PREVIEW_MIN_HEIGHT)
+                .coerceAtMost(maxBlockHeight())
+            return MeasuredPreview(text, widthPx, height)
         }
 
         private fun newTitlePaint(color: Int = ReadBookConfig.textColor): TextPaint {
@@ -224,27 +244,19 @@ data class ChapterCommentPageBlock(
             }
         }
 
-        private fun previewLineHeight(paint: TextPaint): Float {
-            return (paint.descent() - paint.ascent()) * PREVIEW_LINE_SPACING
-        }
-
         private fun maxBlockHeight(): Float {
             val pageBudget = ChapterProvider.visibleHeight - TOP_GAP - END_PADDING
             return max(PREVIEW_MIN_HEIGHT, pageBudget.toFloat())
         }
 
-        /**
-         * Body text column width. Do **not** use visibleRight - paddingLeft:
-         * on double-page, visibleRight is the full screen edge while content
-         * only uses half ([ChapterProvider.visibleWidth]).
-         */
-        private fun contentMaxWidth(): Float {
-            return max(0f, ChapterProvider.visibleWidth - HORIZONTAL_PADDING * 2)
+        private fun contentMaxWidthPx(): Int {
+            val fromColumn = ChapterProvider.visibleWidth - HORIZONTAL_PADDING * 2
+            val width = if (fromColumn > 1f) fromColumn else FALLBACK_CONTENT_WIDTH.toFloat()
+            return max(1, width.toInt())
         }
 
         private fun previewItems(summary: ChapterCommentSummary): List<String> {
             return summary.previews.asSequence()
-                // Keep paragraph breaks; only collapse horizontal whitespace.
                 .map { raw ->
                     raw.replace(WHITESPACE_REGEX, " ")
                         .replace(Regex("\\n{3,}"), "\n\n")
@@ -255,87 +267,76 @@ data class ChapterCommentPageBlock(
                 .toList()
         }
 
+        private fun joinPreviews(previews: List<String>): String {
+            return previews.joinToString("\n")
+        }
+
         private fun titleTextSize(): Float = (ChapterProvider.contentPaint.textSize * 0.74f)
             .coerceIn(MIN_TITLE_TEXT_SIZE, MAX_TITLE_TEXT_SIZE)
 
         private fun previewTextSize(): Float = (ChapterProvider.contentPaint.textSize * 0.62f)
             .coerceIn(MIN_PREVIEW_TEXT_SIZE, MAX_PREVIEW_TEXT_SIZE)
 
-        private fun layoutPreviewLines(
-            previews: List<String>,
+        /**
+         * @param maxHeight when finite and content overflows, cap lines with END ellipsis.
+         *                  Use [Float.POSITIVE_INFINITY] for full unclipped measure.
+         */
+        private fun buildStaticLayout(
+            text: String,
             paint: TextPaint,
-            maxWidth: Float,
-        ): List<String> {
-            if (maxWidth <= 0f) return emptyList()
-            return previews.flatMap { preview ->
-                // Wrap each paragraph separately so newlines from author notes survive.
-                preview.split('\n').flatMap { paragraph ->
-                    val text = paragraph.trim()
-                    if (text.isEmpty()) emptyList() else wrapText(text, paint, maxWidth)
-                }
-            }
-        }
-
-        private fun wrapText(text: String, paint: TextPaint, maxWidth: Float): List<String> {
-            if (text.isEmpty() || maxWidth <= 0f) return emptyList()
-            val widthPx = max(1, maxWidth.toInt())
-            val layout = buildStaticLayout(text, paint, widthPx)
-            return (0 until layout.lineCount).mapNotNull { index ->
-                val start = layout.getLineStart(index)
-                val end = layout.getLineEnd(index)
-                if (start >= end) return@mapNotNull null
-                text.substring(start, end).trimEnd().takeIf(String::isNotEmpty)
-            }
-        }
-
-        private fun buildStaticLayout(text: String, paint: TextPaint, widthPx: Int): StaticLayout {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
+            widthPx: Int,
+            maxHeight: Float,
+        ): StaticLayout {
+            val width = max(1, widthPx)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val builder = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(0f, 1f)
                     .setIncludePad(false)
-                    .build()
-            } else {
-                @Suppress("DEPRECATION")
-                StaticLayout(
-                    text,
-                    paint,
-                    widthPx,
-                    Layout.Alignment.ALIGN_NORMAL,
-                    1f,
-                    0f,
-                    false,
-                )
+                if (maxHeight.isFinite() && maxHeight > 0f) {
+                    // Probe full height first without ellipsize.
+                    val probe = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                        .setLineSpacing(0f, 1f)
+                        .setIncludePad(false)
+                        .build()
+                    if (probe.height > maxHeight) {
+                        val lineHeight = max(1, probe.height / max(1, probe.lineCount))
+                        val maxLines = max(1, (maxHeight / lineHeight).toInt())
+                        builder.setMaxLines(maxLines)
+                            .setEllipsize(TextUtils.TruncateAt.END)
+                    }
+                }
+                return builder.build()
             }
-        }
-
-        private fun fitPreviewLines(
-            lines: List<String>,
-            maxLines: Int,
-            paint: TextPaint,
-            maxWidth: Float,
-        ): List<String> {
-            if (lines.isEmpty() || maxLines <= 0) return emptyList()
-            if (lines.size <= maxLines) return lines
-            if (maxLines == 1) {
-                return listOf(
-                    TextUtils.ellipsize(
-                        lines.joinToString(""),
-                        paint,
-                        maxWidth,
-                        TextUtils.TruncateAt.END,
-                    ).toString(),
-                ).filter(String::isNotEmpty)
-            }
-            val head = lines.take(maxLines - 1)
-            val rest = lines.drop(maxLines - 1).joinToString("")
-            val last = TextUtils.ellipsize(
-                rest,
+            @Suppress("DEPRECATION")
+            val full = StaticLayout(
+                text,
                 paint,
-                maxWidth,
-                TextUtils.TruncateAt.END,
-            ).toString()
-            return (head + last).filter(String::isNotEmpty)
+                width,
+                Layout.Alignment.ALIGN_NORMAL,
+                1f,
+                0f,
+                false,
+            )
+            if (!maxHeight.isFinite() || maxHeight <= 0f || full.height <= maxHeight) {
+                return full
+            }
+            val lineHeight = max(1, full.height / max(1, full.lineCount))
+            val maxLines = max(1, (maxHeight / lineHeight).toInt())
+            // Pre-API 23: approximate by truncating string to visible lines.
+            val end = full.getLineEnd((maxLines - 1).coerceAtMost(full.lineCount - 1))
+            val clipped = text.substring(0, end).trimEnd() + "…"
+            @Suppress("DEPRECATION")
+            return StaticLayout(
+                clipped,
+                paint,
+                width,
+                Layout.Alignment.ALIGN_NORMAL,
+                1f,
+                0f,
+                false,
+            )
         }
     }
 }
