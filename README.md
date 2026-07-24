@@ -28,7 +28,6 @@
 
 ## 友情链接
 
-- [LuckyIsland](https://github.com/thisxiaoyuQAQ/LuckyIsland) — Windows 灵动岛风格桌面助手（时间、天气、日历、股票、待办、终端、通知与 AI 助手）
 - [LINUX DO Credit](https://github.com/linux-do/credit) — LINUX DO 社区积分相关项目
 
 ## 许可
