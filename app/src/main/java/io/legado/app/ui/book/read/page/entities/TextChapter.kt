@@ -379,8 +379,7 @@ data class TextChapter(
                 ?: ChapterProvider.paddingTop.toFloat(),
         )
         val top = contentBottom + TOP_GAP
-        val blockHeight = ChapterCommentPageBlock.preferredHeight(summary)
-        val block = ChapterCommentPageBlock(summary, top, blockHeight)
+        val block = ChapterCommentPageBlock.create(summary, top)
         if (block.bottom + END_PADDING <= ChapterProvider.visibleBottom) {
             lastTextPage.addBlock(block)
             return
@@ -389,21 +388,24 @@ data class TextChapter(
         val chapterEndPosition = lastTextPage.lines.lastOrNull()?.let {
             it.chapterPosition + it.charSize + if (it.isParagraphEnd) 1 else 0
         } ?: lastTextPage.chapterPosition + lastTextPage.charSize
+        val pageBlock = ChapterCommentPageBlock.create(
+            summary,
+            ChapterProvider.paddingTop + TOP_GAP,
+        )
         val blockOnlyPage = TextPage(
             index = textPages.size,
             text = "",
             title = title,
             chapterSize = chaptersSize,
             chapterIndex = chapter.index,
-            height = ChapterProvider.paddingTop + blockHeight +
-                    TOP_GAP + END_PADDING,
+            height = pageBlock.bottom + END_PADDING,
         ).apply {
             fallbackChapterPosition = chapterEndPosition
             textChapter = this@TextChapter
             doublePage = ChapterProvider.doublePage
             paddingTop = ChapterProvider.paddingTop
             isCompleted = true
-            addBlock(ChapterCommentPageBlock(summary, ChapterProvider.paddingTop + TOP_GAP, blockHeight))
+            addBlock(pageBlock)
         }
         textPages.add(blockOnlyPage)
     }

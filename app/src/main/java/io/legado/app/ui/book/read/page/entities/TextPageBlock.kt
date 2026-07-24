@@ -2,6 +2,9 @@ package io.legado.app.ui.book.read.page.entities
 
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.os.Build
+import android.text.Layout
+import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
 import androidx.core.graphics.ColorUtils
@@ -10,7 +13,6 @@ import io.legado.app.model.chapterComment.ChapterCommentParser
 import io.legado.app.model.chapterComment.ChapterCommentSummary
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.utils.dpToPx
-import java.text.BreakIterator
 import kotlin.math.floor
 import kotlin.math.max
 
@@ -22,10 +24,19 @@ sealed interface TextPageBlock {
     fun contains(x: Float, y: Float, relativeOffset: Float): Boolean
 }
 
+/**
+ * Chapter-end author / chapter-comment card.
+ *
+ * Preview lines are laid out **once** at construction ([create] / [measure]) so
+ * height and draw always share the same wrap result. Re-wrapping in [draw] with
+ * a different paint/width previously produced a short card + ellipsis for long
+ * single-preview author notes.
+ */
 data class ChapterCommentPageBlock(
     val summary: ChapterCommentSummary,
     override val top: Float,
-    override val height: Float = preferredHeight(summary),
+    override val height: Float,
+    private val previewLines: List<String>,
 ) : TextPageBlock {
 
     val isInteractive: Boolean
@@ -33,7 +44,8 @@ data class ChapterCommentPageBlock(
 
     override fun draw(canvas: Canvas) {
         val left = ChapterProvider.paddingLeft.toFloat()
-        val right = ChapterProvider.visibleRight.toFloat()
+        // Match body text column (visibleWidth), not full-screen visibleRight.
+        val right = left + ChapterProvider.visibleWidth
         val textColor = ReadBookConfig.textColor
         val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ColorUtils.setAlphaComponent(textColor, 18)
@@ -122,27 +134,11 @@ data class ChapterCommentPageBlock(
             canvas.drawText(">", contentRight, titleBaseline, countPaint)
         }
 
-        val previews = previewItems(summary)
-        if (previews.isEmpty()) return
-
-        // Must match preferredHeight(): same typeface/size/width → same wrap lines.
+        if (previewLines.isEmpty()) return
         val previewPaint = newPreviewPaint(ColorUtils.setAlphaComponent(textColor, 175))
-        val maxWidth = contentMaxWidth()
         val firstBaseline = titleBaseline + TITLE_PREVIEW_GAP - previewPaint.ascent()
         val lineHeight = previewLineHeight(previewPaint)
-        val titleHeight = labelPaint.descent() - labelPaint.ascent()
-        val availablePreviewHeight = max(
-            0f,
-            height - TOP_PADDING - titleHeight - TITLE_PREVIEW_GAP - BOTTOM_PADDING,
-        )
-        val maxLines = max(1, floor(availablePreviewHeight / lineHeight).toInt())
-        val lines = fitPreviewLines(
-            layoutPreviewLines(previews, previewPaint, maxWidth),
-            maxLines,
-            previewPaint,
-            maxWidth,
-        )
-        lines.forEachIndexed { index, line ->
+        previewLines.forEachIndexed { index, line ->
             canvas.drawText(line, contentLeft, firstBaseline + index * lineHeight, previewPaint)
         }
     }
@@ -150,8 +146,9 @@ data class ChapterCommentPageBlock(
     override fun contains(x: Float, y: Float, relativeOffset: Float): Boolean {
         if (!isInteractive) return false
         val localY = y - relativeOffset
-        return x in ChapterProvider.paddingLeft.toFloat()..ChapterProvider.visibleRight.toFloat() &&
-                localY in top..bottom
+        val left = ChapterProvider.paddingLeft.toFloat()
+        val right = left + ChapterProvider.visibleWidth
+        return x in left..right && localY in top..bottom
     }
 
     companion object {
@@ -175,24 +172,40 @@ data class ChapterCommentPageBlock(
         private val CORNER_RADIUS = 7.dpToPx().toFloat()
         private val BADGE_CORNER_RADIUS = 4.dpToPx().toFloat()
         private const val PREVIEW_LINE_SPACING = 1.12f
-        /** Hard safety against pathological wrap loops (512-char previews). */
-        private const val MAX_WRAP_LINES = 256
-        private val WHITESPACE_REGEX = Regex("\\s+")
+        private val WHITESPACE_REGEX = Regex("[ \\t\\x0B\\f\\r]+")
 
-        fun preferredHeight(summary: ChapterCommentSummary): Float {
+        private data class MeasuredPreview(
+            val lines: List<String>,
+            val height: Float,
+        )
+
+        fun create(summary: ChapterCommentSummary, top: Float): ChapterCommentPageBlock {
+            val measured = measure(summary)
+            return ChapterCommentPageBlock(summary, top, measured.height, measured.lines)
+        }
+
+        fun preferredHeight(summary: ChapterCommentSummary): Float = measure(summary).height
+
+        private fun measure(summary: ChapterCommentSummary): MeasuredPreview {
             val previews = previewItems(summary)
-            if (previews.isEmpty()) return DEFAULT_HEIGHT
-            // Same metrics as draw(): typeface + size + content width.
+            if (previews.isEmpty()) {
+                return MeasuredPreview(emptyList(), DEFAULT_HEIGHT)
+            }
             val titlePaint = newTitlePaint()
             val previewPaint = newPreviewPaint()
             val titleHeight = titlePaint.descent() - titlePaint.ascent()
             val lineHeight = previewLineHeight(previewPaint)
             val maxWidth = contentMaxWidth()
-            val wrapped = layoutPreviewLines(previews, previewPaint, maxWidth)
-            val lineCount = max(1, wrapped.size)
+            val fullLines = layoutPreviewLines(previews, previewPaint, maxWidth)
+            val lineCount = max(1, fullLines.size)
             val natural = TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP +
                     lineHeight * lineCount + BOTTOM_PADDING
-            return natural.coerceIn(PREVIEW_MIN_HEIGHT, maxBlockHeight())
+            val height = natural.coerceIn(PREVIEW_MIN_HEIGHT, maxBlockHeight())
+            val chrome = TOP_PADDING + titleHeight + TITLE_PREVIEW_GAP + BOTTOM_PADDING
+            val available = max(0f, height - chrome)
+            val maxLines = max(1, floor(available / lineHeight).toInt())
+            val lines = fitPreviewLines(fullLines, maxLines, previewPaint, maxWidth)
+            return MeasuredPreview(lines, height)
         }
 
         private fun newTitlePaint(color: Int = ReadBookConfig.textColor): TextPaint {
@@ -220,18 +233,23 @@ data class ChapterCommentPageBlock(
             return max(PREVIEW_MIN_HEIGHT, pageBudget.toFloat())
         }
 
+        /**
+         * Body text column width. Do **not** use visibleRight - paddingLeft:
+         * on double-page, visibleRight is the full screen edge while content
+         * only uses half ([ChapterProvider.visibleWidth]).
+         */
         private fun contentMaxWidth(): Float {
-            val fromEdges = ChapterProvider.visibleRight - ChapterProvider.paddingLeft -
-                    HORIZONTAL_PADDING * 2
-            if (fromEdges > 1f) return fromEdges
-            // Fallback when edge fields are not ready yet during layout.
-            val fromVisible = ChapterProvider.visibleWidth - HORIZONTAL_PADDING * 2
-            return max(0f, fromVisible.toFloat())
+            return max(0f, ChapterProvider.visibleWidth - HORIZONTAL_PADDING * 2)
         }
 
         private fun previewItems(summary: ChapterCommentSummary): List<String> {
             return summary.previews.asSequence()
-                .map { it.replace(WHITESPACE_REGEX, " ").trim() }
+                // Keep paragraph breaks; only collapse horizontal whitespace.
+                .map { raw ->
+                    raw.replace(WHITESPACE_REGEX, " ")
+                        .replace(Regex("\\n{3,}"), "\n\n")
+                        .trim()
+                }
                 .filter(String::isNotEmpty)
                 .take(ChapterCommentParser.MAX_PREVIEWS)
                 .toList()
@@ -243,62 +261,54 @@ data class ChapterCommentPageBlock(
         private fun previewTextSize(): Float = (ChapterProvider.contentPaint.textSize * 0.62f)
             .coerceIn(MIN_PREVIEW_TEXT_SIZE, MAX_PREVIEW_TEXT_SIZE)
 
-        /**
-         * Wrap every preview fully (no 2-line / 1-line ellipsize cap).
-         * Author notes and chapter-comment snippets share this path.
-         */
         private fun layoutPreviewLines(
             previews: List<String>,
             paint: TextPaint,
             maxWidth: Float,
         ): List<String> {
             if (maxWidth <= 0f) return emptyList()
-            return previews.flatMap { wrapText(it, paint, maxWidth) }
+            return previews.flatMap { preview ->
+                // Wrap each paragraph separately so newlines from author notes survive.
+                preview.split('\n').flatMap { paragraph ->
+                    val text = paragraph.trim()
+                    if (text.isEmpty()) emptyList() else wrapText(text, paint, maxWidth)
+                }
+            }
         }
 
         private fun wrapText(text: String, paint: TextPaint, maxWidth: Float): List<String> {
             if (text.isEmpty() || maxWidth <= 0f) return emptyList()
-            val lines = ArrayList<String>()
-            var remaining = text
-            var guard = 0
-            while (remaining.isNotEmpty() && guard++ < MAX_WRAP_LINES) {
-                val measuredLength = paint.breakText(remaining, true, maxWidth, null)
-                var cut = safeCharacterBoundary(remaining, measuredLength)
-                if (cut <= 0) {
-                    // Force progress so a zero-width break cannot stall the loop.
-                    cut = remaining.offsetByCodePoints(0, 1).coerceAtMost(remaining.length)
-                    val piece = remaining.substring(0, cut)
-                    val fallback = TextUtils.ellipsize(
-                        piece,
-                        paint,
-                        maxWidth,
-                        TextUtils.TruncateAt.END,
-                    ).toString()
-                    if (fallback.isNotEmpty()) lines.add(fallback)
-                    remaining = remaining.substring(cut).trimStart()
-                    continue
-                }
-                if (cut >= remaining.length) {
-                    lines.add(remaining)
-                    break
-                }
-                val line = remaining.substring(0, cut).trimEnd()
-                if (line.isNotEmpty()) {
-                    lines.add(line)
-                } else {
-                    // Whitespace-only slice: skip without stalling.
-                    remaining = remaining.substring(cut).trimStart()
-                    continue
-                }
-                remaining = remaining.substring(cut).trimStart()
+            val widthPx = max(1, maxWidth.toInt())
+            val layout = buildStaticLayout(text, paint, widthPx)
+            return (0 until layout.lineCount).mapNotNull { index ->
+                val start = layout.getLineStart(index)
+                val end = layout.getLineEnd(index)
+                if (start >= end) return@mapNotNull null
+                text.substring(start, end).trimEnd().takeIf(String::isNotEmpty)
             }
-            return lines
         }
 
-        /**
-         * Prefer full text; only ellipsize when content exceeds the allocated block
-         * (typically a full reading page after [maxBlockHeight] clamping).
-         */
+        private fun buildStaticLayout(text: String, paint: TextPaint, widthPx: Int): StaticLayout {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .setLineSpacing(0f, 1f)
+                    .setIncludePad(false)
+                    .build()
+            } else {
+                @Suppress("DEPRECATION")
+                StaticLayout(
+                    text,
+                    paint,
+                    widthPx,
+                    Layout.Alignment.ALIGN_NORMAL,
+                    1f,
+                    0f,
+                    false,
+                )
+            }
+        }
+
         private fun fitPreviewLines(
             lines: List<String>,
             maxLines: Int,
@@ -326,18 +336,6 @@ data class ChapterCommentPageBlock(
                 TextUtils.TruncateAt.END,
             ).toString()
             return (head + last).filter(String::isNotEmpty)
-        }
-
-        private fun safeCharacterBoundary(text: String, measuredLength: Int): Int {
-            if (measuredLength <= 0 || measuredLength >= text.length) {
-                return measuredLength.coerceIn(0, text.length)
-            }
-            val iterator = BreakIterator.getCharacterInstance().apply { setText(text) }
-            return if (iterator.isBoundary(measuredLength)) {
-                measuredLength
-            } else {
-                iterator.preceding(measuredLength).coerceAtLeast(0)
-            }
         }
     }
 }
