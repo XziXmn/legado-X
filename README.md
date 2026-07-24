@@ -26,6 +26,11 @@
 
 阅读通过用户自定义的第三方书源获取内容，不对书源内容及其合法性负责。请自行判断风险。权利人如需处理侵权内容，请联系维护并提供权属证明。
 
+## 友情链接
+
+- [LuckyIsland](https://github.com/thisxiaoyuQAQ/LuckyIsland) — Windows 灵动岛风格桌面助手（时间、天气、日历、股票、待办、终端、通知与 AI 助手）
+- [LINUX DO Credit](https://github.com/linux-do/credit) — LINUX DO 社区积分相关项目
+
 ## 许可
 
 [GPL-3.0](LICENSE) · 致谢 [gedoor/legado](https://github.com/gedoor/legado)、[Luoyacheng/legado-E](https://github.com/Luoyacheng/legado-E) 与开源依赖作者。
